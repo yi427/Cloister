@@ -132,7 +132,7 @@ The live bind-mount workflow can ship early because it already works on the
 development machine. Stronger workspace integrity and egress control remain
 separate milestones instead of being implied by the VM boundary.
 
-The next implementation slice should parse and validate the draft profile
-without invoking `container`. The following slice can translate validated
-profiles into inspectable command arguments and unit-test them before running a
-real environment.
+Profile parsing, validation, command planning, and process execution remain
+separate layers. The exact `container run` command can be inspected with
+`--dry-run`, while real execution consumes the same argument vector without
+shell parsing.

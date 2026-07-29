@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Complete dry-run plan for one development environment.
+/// Complete execution plan for one development environment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimePlan {
     pub(super) profile_name: String,
@@ -76,7 +76,7 @@ impl fmt::Display for RuntimePlan {
             write!(formatter, "{agent}")?;
         }
         writeln!(formatter)?;
-        writeln!(formatter, "Execution: dry-run only")?;
+        writeln!(formatter, "Lifecycle: run and remove after exit")?;
         writeln!(formatter, "Command:")?;
         writeln!(formatter, "  program: {:?}", self.command.program)?;
         writeln!(formatter, "  arguments:")?;

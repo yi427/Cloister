@@ -1,6 +1,6 @@
 # Profile V1 example.
 # Check: cargo run -- profile check examples/profile.toml
-# Plan:  cargo run -- run --profile examples/profile.toml --dry-run
+# Plan:  cargo run -- run --profile examples/profile.toml --dry-run -- /bin/sh
 schema_version = 1
 name = "rust-default"
 

@@ -5,9 +5,9 @@ coding agents. It will use Apple's `container` CLI to run Codex, Claude Code,
 and development toolchains inside lightweight Linux virtual machines on Apple
 silicon.
 
-The project is currently at the environment-definition stage. The Rust binary
-can load profiles, produce inspectable runtime plans, and serve an authenticated
-host-command bridge. It does not create or manage containers yet.
+The project is currently at the first executable-runtime stage. The Rust binary
+can load profiles, produce inspectable runtime plans, run commands through Apple
+`container`, and serve an authenticated host-command bridge.
 
 ## MVP boundary
 
@@ -47,11 +47,26 @@ cargo run -- profile check examples/profile.toml
 Inspect the Apple container command plan without starting a virtual machine:
 
 ```sh
-cargo run -- run --profile examples/profile.toml --dry-run
+cargo run -- run --profile examples/profile.toml --dry-run -- /bin/sh
+```
+
+Run a command in a temporary environment:
+
+```sh
+cargo run -- run --profile examples/smoke.toml -- /bin/sh
+```
+
+Verify the project mount non-interactively:
+
+```sh
+cargo run -- run --profile examples/smoke.toml -- \
+  /bin/sh -lc 'pwd && test -f smoke.toml && echo "workspace ready"'
 ```
 
 Relative `workspace.host` values are resolved from the directory containing the
-profile file, not from the shell's current working directory.
+profile file, not from the shell's current working directory. The smoke profile
+therefore mounts the `examples/` directory that contains it. It intentionally
+uses a public Debian image and does not contain Codex or Claude Code.
 
 The current Host Bridge prototype exposes one MCP tool, `host.exec`. Start it
 with an unused token path:

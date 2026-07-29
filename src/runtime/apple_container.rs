@@ -9,15 +9,18 @@ use std::{
 use crate::{
     error::message,
     preflight::ResolvedProfile,
-    profile::{Architecture, NetworkMode, WorkspaceAccess, WorkspaceMode},
+    profile::{Architecture, NetworkMode, Profile, WorkspaceAccess, WorkspaceMode},
 };
 
 use super::plan::{
     AgentKind, CommandSpec, NetworkExposure, RuntimePlan, WorkspaceMount, WorkspaceMountAccess,
 };
 
-/// Produces an inspectable `container create` plan without starting a process.
-pub fn plan_apple_container(resolved: &ResolvedProfile) -> Result<RuntimePlan, RuntimePlanError> {
+/// Produces an inspectable `container run` plan without starting a process.
+pub fn plan_apple_container(
+    resolved: &ResolvedProfile,
+    container_command: &[OsString],
+) -> Result<RuntimePlan, RuntimePlanError> {
     let profile = resolved.profile();
 
     if profile.workspace.mode != WorkspaceMode::Bind {
@@ -45,7 +48,7 @@ pub fn plan_apple_container(resolved: &ResolvedProfile) -> Result<RuntimePlan, R
     .into_iter()
     .flatten()
     .collect();
-    let command = build_create_command(resolved, workspace_access);
+    let command = build_run_command(profile, &workspace, container_command);
 
     Ok(RuntimePlan {
         profile_name: profile.name.clone(),
@@ -57,64 +60,98 @@ pub fn plan_apple_container(resolved: &ResolvedProfile) -> Result<RuntimePlan, R
     })
 }
 
-fn build_create_command(
-    resolved: &ResolvedProfile,
-    workspace_access: WorkspaceMountAccess,
+fn build_run_command(
+    profile: &Profile,
+    workspace: &WorkspaceMount,
+    container_command: &[OsString],
 ) -> CommandSpec {
-    let profile = resolved.profile();
-    let architecture = match profile.image.architecture {
-        Architecture::Arm64 => "arm64",
-    };
-    let arguments = vec![
-        OsString::from("create"),
-        OsString::from("--name"),
-        OsString::from(&profile.guest.hostname),
-        OsString::from("--arch"),
-        OsString::from(architecture),
-        OsString::from("--cpus"),
-        OsString::from(profile.guest.cpus.get().to_string()),
-        OsString::from("--memory"),
-        OsString::from(profile.guest.memory.to_string()),
-        OsString::from("--user"),
-        OsString::from(&profile.guest.user),
-        OsString::from("--workdir"),
-        profile.workspace.guest.as_os_str().to_owned(),
-        OsString::from("--env"),
-        OsString::from(format!("LANG={}", profile.guest.locale)),
-        OsString::from("--env"),
-        OsString::from(format!("LC_ALL={}", profile.guest.locale)),
-        OsString::from("--env"),
-        OsString::from(format!("TZ={}", profile.guest.timezone)),
-        OsString::from("--interactive"),
-        OsString::from("--tty"),
-        OsString::from("--read-only"),
-        OsString::from("--tmpfs"),
-        OsString::from("/tmp"),
-        OsString::from("--network"),
-        OsString::from("default"),
-        OsString::from("--mount"),
-        mount_argument(resolved, workspace_access),
-        OsString::from("--label"),
-        OsString::from(format!("org.cloister.profile={}", profile.name)),
-        OsString::from(&profile.image.reference),
-    ];
+    let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
 
-    CommandSpec {
-        program: OsString::from("container"),
-        arguments,
+    command.flag("--rm");
+    command.option("--name", &profile.guest.hostname);
+    command.option("--arch", architecture_argument(profile.image.architecture));
+    command.option("--cpus", profile.guest.cpus.get().to_string());
+    command.option("--memory", profile.guest.memory.to_string());
+    command.option("--user", &profile.guest.user);
+    command.option("--workdir", workspace.guest());
+
+    command.environment("LANG", &profile.guest.locale);
+    command.environment("LC_ALL", &profile.guest.locale);
+    command.environment("TZ", &profile.guest.timezone);
+
+    command.flag("--interactive");
+    command.flag("--tty");
+    command.flag("--read-only");
+    command.option("--tmpfs", "/tmp");
+    command.option("--network", "default");
+    command.option("--mount", mount_argument(workspace));
+    command.option("--label", format!("org.cloister.profile={}", profile.name));
+
+    command.container_command(container_command);
+    command.finish()
+}
+
+fn architecture_argument(architecture: Architecture) -> &'static str {
+    match architecture {
+        Architecture::Arm64 => "arm64",
     }
 }
 
-fn mount_argument(resolved: &ResolvedProfile, workspace_access: WorkspaceMountAccess) -> OsString {
-    let workspace = &resolved.profile().workspace;
+fn mount_argument(workspace: &WorkspaceMount) -> OsString {
     let mut argument = OsString::from("type=bind,source=");
-    argument.push(&workspace.host);
+    argument.push(workspace.host());
     argument.push(",target=");
-    argument.push(&workspace.guest);
-    if workspace_access == WorkspaceMountAccess::ReadOnly {
+    argument.push(workspace.guest());
+    if workspace.access() == WorkspaceMountAccess::ReadOnly {
         argument.push(",readonly");
     }
     argument
+}
+
+struct ContainerRunCommandBuilder {
+    options: Vec<OsString>,
+    image: OsString,
+    container_command: Vec<OsString>,
+}
+
+impl ContainerRunCommandBuilder {
+    fn new(image: impl AsRef<OsStr>) -> Self {
+        Self {
+            options: vec![OsString::from("run")],
+            image: image.as_ref().to_owned(),
+            container_command: Vec::new(),
+        }
+    }
+
+    fn flag(&mut self, flag: &'static str) {
+        self.options.push(OsString::from(flag));
+    }
+
+    fn option(&mut self, option: &'static str, value: impl AsRef<OsStr>) {
+        self.flag(option);
+        self.options.push(value.as_ref().to_owned());
+    }
+
+    fn environment(&mut self, name: &'static str, value: &str) {
+        self.option("--env", format!("{name}={value}"));
+    }
+
+    fn container_command(&mut self, command: &[OsString]) {
+        self.container_command.extend_from_slice(command);
+    }
+
+    fn finish(self) -> CommandSpec {
+        let mut arguments =
+            Vec::with_capacity(self.options.len() + self.container_command.len() + 1);
+        arguments.extend(self.options);
+        arguments.push(self.image);
+        arguments.extend(self.container_command);
+
+        CommandSpec {
+            program: OsString::from("container"),
+            arguments,
+        }
+    }
 }
 
 fn reject_mount_separator(path: &std::path::Path) -> Result<(), RuntimePlanError> {

@@ -40,7 +40,7 @@ enum Command {
 /// Parses process arguments and executes the requested command.
 pub async fn run() -> ExitCode {
     match Cli::parse().command.execute().await {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(exit_code) => exit_code,
         Err(error) => {
             eprintln!("{}: {error}", message::CLI_ERROR_PREFIX);
             ExitCode::FAILURE
@@ -49,11 +49,18 @@ pub async fn run() -> ExitCode {
 }
 
 impl Command {
-    async fn execute(self) -> Result<(), CliError> {
+    async fn execute(self) -> Result<ExitCode, CliError> {
         match self {
-            Self::Host(arguments) => arguments.execute().await.map_err(CliError::Host),
-            Self::Profile(arguments) => arguments.execute().map_err(CliError::Profile),
-            Self::Run(arguments) => arguments.execute().map_err(CliError::Run),
+            Self::Host(arguments) => arguments
+                .execute()
+                .await
+                .map(|()| ExitCode::SUCCESS)
+                .map_err(CliError::Host),
+            Self::Profile(arguments) => arguments
+                .execute()
+                .map(|()| ExitCode::SUCCESS)
+                .map_err(CliError::Profile),
+            Self::Run(arguments) => arguments.execute().await.map_err(CliError::Run),
         }
     }
 }

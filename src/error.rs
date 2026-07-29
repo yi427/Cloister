@@ -24,9 +24,8 @@ pub(crate) mod message {
     pub const NETWORK_RESTRICTED_NOT_IMPLEMENTED: &str =
         "restricted network mode is not implemented";
     pub const AT_LEAST_ONE_AGENT_REQUIRED: &str = "at least one coding agent must be enabled";
-    pub const CONTAINER_EXECUTION_NOT_IMPLEMENTED: &str =
-        "container execution is not implemented; pass --dry-run to inspect the plan";
     pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "workspace mount paths must not contain ','";
+    pub const RUNTIME_START_FAILED: &str = "failed to start runtime";
 
     pub const BRIDGE_TOKEN_READ_FAILED: &str = "failed to read host bridge token";
     pub const BRIDGE_TOKEN_CREATE_FAILED: &str = "failed to create host bridge token";

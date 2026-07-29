@@ -20,7 +20,7 @@ fn default_plan() -> cloister::runtime::RuntimePlan {
     let profile = load_profile(&path).expect("default profile should load");
     let resolved = resolve_profile(profile, path).expect("default workspace should resolve");
 
-    plan_apple_container(&resolved).expect("default profile should produce a plan")
+    plan_apple_container(&resolved, &[]).expect("default profile should produce a plan")
 }
 
 fn argument_after<'a>(arguments: &'a [OsString], option: &str) -> &'a OsStr {
@@ -49,8 +49,9 @@ fn translates_every_supported_runtime_setting() {
     assert_eq!(plan.command().program(), OsStr::new("container"));
     assert_eq!(
         arguments.first().map(OsString::as_os_str),
-        Some(OsStr::new("create"))
+        Some(OsStr::new("run"))
     );
+    assert!(arguments.iter().any(|argument| argument == "--rm"));
     assert_eq!(argument_after(arguments, "--name"), "cloister");
     assert_eq!(argument_after(arguments, "--arch"), "arm64");
     assert_eq!(argument_after(arguments, "--cpus"), "4");
@@ -105,7 +106,7 @@ fn adds_readonly_to_a_read_only_workspace_mount() {
     let mut profile = load_profile(&path).expect("default profile should load");
     profile.workspace.access = WorkspaceAccess::ReadOnly;
     let resolved = resolve_profile(profile, path).expect("workspace should resolve");
-    let plan = plan_apple_container(&resolved).expect("read-only workspace should plan");
+    let plan = plan_apple_container(&resolved, &[]).expect("read-only workspace should plan");
     let mount = argument_after(plan.command().arguments(), "--mount").to_string_lossy();
 
     assert_eq!(plan.workspace().access(), WorkspaceMountAccess::ReadOnly);
@@ -119,7 +120,7 @@ fn rejects_a_mount_path_that_container_cannot_represent() {
     profile.workspace.guest = PathBuf::from("/work,space");
     let resolved = resolve_profile(profile, path).expect("host workspace should resolve");
 
-    let error = plan_apple_container(&resolved).expect_err("comma mount path should fail");
+    let error = plan_apple_container(&resolved, &[]).expect_err("comma mount path should fail");
 
     assert!(error.to_string().contains("must not contain ','"));
 }
@@ -133,7 +134,7 @@ fn fails_closed_for_unsupported_runtime_policies() {
         resolve_profile(copy_profile, &path).expect("host workspace should resolve");
 
     let copy_error =
-        plan_apple_container(&copy_resolved).expect_err("copy mode should not produce a plan");
+        plan_apple_container(&copy_resolved, &[]).expect_err("copy mode should not produce a plan");
     assert!(copy_error.to_string().contains("copy workspace mode"));
 
     let mut restricted_profile = load_profile(&path).expect("default profile should load");
@@ -141,11 +142,34 @@ fn fails_closed_for_unsupported_runtime_policies() {
     let restricted_resolved =
         resolve_profile(restricted_profile, path).expect("host workspace should resolve");
 
-    let restricted_error = plan_apple_container(&restricted_resolved)
+    let restricted_error = plan_apple_container(&restricted_resolved, &[])
         .expect_err("restricted network should not produce a plan");
     assert!(
         restricted_error
             .to_string()
             .contains("restricted network mode")
+    );
+}
+
+#[test]
+fn appends_the_container_command_without_shell_parsing() {
+    let path = fixture("valid/default.toml");
+    let profile = load_profile(&path).expect("default profile should load");
+    let resolved = resolve_profile(profile, path).expect("default workspace should resolve");
+    let command = [
+        OsString::from("/bin/sh"),
+        OsString::from("-lc"),
+        OsString::from("printf 'hello world'"),
+    ];
+
+    let plan =
+        plan_apple_container(&resolved, &command).expect("container command should produce a plan");
+    let arguments = plan.command().arguments();
+    let image_index = arguments.len() - command.len() - 1;
+
+    assert_eq!(arguments[image_index], "cloister/rust-node:dev");
+    assert_eq!(
+        &arguments[arguments.len() - command.len()..],
+        command.as_slice()
     );
 }

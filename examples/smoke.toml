@@ -1,0 +1,35 @@
+# Minimal profile for verifying that Cloister can start a real environment.
+# Run: cargo run -- run --profile examples/smoke.toml -- /bin/sh
+schema_version = 1
+name = "smoke"
+
+[image]
+reference = "docker.io/library/debian:bookworm-slim"
+architecture = "arm64"
+
+[guest]
+hostname = "cloister-smoke"
+cpus = 2
+memory = "1G"
+user = "root"
+locale = "C.UTF-8"
+timezone = "UTC"
+
+[workspace]
+# Profile-relative "." exposes this examples directory for the smoke test.
+mode = "bind"
+host = "."
+guest = "/workspace"
+access = "read-write"
+
+[network]
+mode = "default"
+
+[agents.codex]
+# Profile V1 requires an enabled agent. The smoke image does not install Codex.
+enabled = true
+state = "isolated"
+
+[agents.claude]
+enabled = false
+state = "isolated"
