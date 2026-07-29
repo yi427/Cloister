@@ -46,11 +46,26 @@ examples/        User-facing configuration examples
 docs/adr/        Architecture decision records
 ```
 
-## Local verification
+## Development workflow
+
+Enable the repository-managed Git hooks once after cloning:
 
 ```sh
-cargo fmt --check
-cargo check
-cargo test
-cargo clippy --all-targets -- -D warnings
+make install-hooks
 ```
+
+Format the working tree:
+
+```sh
+make format
+```
+
+Run the same verification used before each commit:
+
+```sh
+make verify
+```
+
+The pre-commit hook verifies the exact staged snapshot in a temporary directory.
+It does not modify files or stage formatting changes automatically. A commit is
+rejected if formatting, compilation, tests, or Clippy fail.

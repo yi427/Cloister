@@ -21,7 +21,8 @@ over hidden defaults.
   cross-module, and CLI tests under `tests/`.
 - Store deterministic test data under `tests/fixtures/`; never use real
   credentials, home-directory state, or machine-specific absolute paths there.
-- Run `cargo fmt --check`, `cargo check`, `cargo test`, and
-  `cargo clippy --all-targets -- -D warnings` before considering a Rust change
-  complete.
+- Run `make format` after editing Rust code and `make verify` before considering
+  a change complete.
+- Keep `.githooks/pre-commit` aligned with `make verify`; the hook must validate
+  the staged snapshot without modifying or staging the working tree.
 - Add focused tests when profile parsing or command construction is introduced.

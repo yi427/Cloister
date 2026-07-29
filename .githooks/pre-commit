@@ -1,0 +1,28 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(git rev-parse --show-toplevel)
+staged_tree=$(mktemp -d "${TMPDIR:-/tmp}/cloister-pre-commit.XXXXXX")
+
+cleanup() {
+    rm -rf "$staged_tree"
+}
+
+trap cleanup EXIT HUP INT TERM
+
+git checkout-index --all --prefix="$staged_tree/"
+
+echo "pre-commit: verifying staged snapshot"
+
+if ! (
+    cd "$staged_tree"
+    CARGO_TARGET_DIR="$repository_root/target/pre-commit" make verify
+); then
+    echo >&2
+    echo "pre-commit: verification failed" >&2
+    echo "Run 'make format' if formatting failed, stage the result, and retry." >&2
+    exit 1
+fi
+
+echo "pre-commit: staged snapshot passed"
