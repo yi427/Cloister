@@ -13,6 +13,7 @@ use crate::{error::message, profile::Profile};
 pub struct ResolvedProfile {
     source: PathBuf,
     profile: Profile,
+    workspace: PathBuf,
 }
 
 impl ResolvedProfile {
@@ -25,41 +26,44 @@ impl ResolvedProfile {
     pub fn profile(&self) -> &Profile {
         &self.profile
     }
+
+    /// Canonical, existing host workspace selected for this execution.
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
 }
 
-/// Resolves a profile's host workspace relative to the profile document.
-pub fn resolve_profile(
-    mut profile: Profile,
+/// Resolves a profile document and the workspace selected for this execution.
+pub fn resolve_profile_workspace(
+    profile: Profile,
     profile_path: impl AsRef<Path>,
+    workspace: impl AsRef<Path>,
 ) -> Result<ResolvedProfile, PreflightError> {
     let profile_path = profile_path.as_ref();
     let source = fs::canonicalize(profile_path).map_err(|source| PreflightError::ProfilePath {
         path: profile_path.to_owned(),
         source,
     })?;
-    let profile_directory = source
-        .parent()
-        .expect("a canonical file path always has a parent");
-    let configured_workspace = profile.workspace.host.clone();
-    let workspace_candidate = if configured_workspace.is_absolute() {
-        configured_workspace.clone()
-    } else {
-        profile_directory.join(&configured_workspace)
-    };
-    let workspace =
-        fs::canonicalize(&workspace_candidate).map_err(|source| PreflightError::WorkspacePath {
-            configured: configured_workspace,
-            resolved: workspace_candidate,
+    let configured = workspace.as_ref().to_owned();
+    let resolved =
+        fs::canonicalize(&configured).map_err(|source| PreflightError::WorkspacePath {
+            configured: configured.clone(),
+            resolved: configured,
             source,
         })?;
 
-    if !workspace.is_dir() {
-        return Err(PreflightError::WorkspaceNotDirectory { path: workspace });
+    if !resolved.is_dir() {
+        return Err(PreflightError::WorkspaceNotDirectory { path: resolved });
+    }
+    if resolved.parent().is_none() {
+        return Err(PreflightError::WorkspaceIsRoot { path: resolved });
     }
 
-    profile.workspace.host = workspace;
-
-    Ok(ResolvedProfile { source, profile })
+    Ok(ResolvedProfile {
+        source,
+        profile,
+        workspace: resolved,
+    })
 }
 
 /// Host-dependent failure encountered before a runtime plan can be produced.
@@ -75,6 +79,9 @@ pub enum PreflightError {
         source: io::Error,
     },
     WorkspaceNotDirectory {
+        path: PathBuf,
+    },
+    WorkspaceIsRoot {
         path: PathBuf,
     },
 }
@@ -105,6 +112,12 @@ impl fmt::Display for PreflightError {
                 message::WORKSPACE_PATH_NOT_DIRECTORY,
                 path.display()
             ),
+            Self::WorkspaceIsRoot { path } => write!(
+                formatter,
+                "{}: '{}'",
+                message::WORKSPACE_PATH_IS_ROOT,
+                path.display()
+            ),
         }
     }
 }
@@ -113,7 +126,7 @@ impl Error for PreflightError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::ProfilePath { source, .. } | Self::WorkspacePath { source, .. } => Some(source),
-            Self::WorkspaceNotDirectory { .. } => None,
+            Self::WorkspaceNotDirectory { .. } | Self::WorkspaceIsRoot { .. } => None,
         }
     }
 }

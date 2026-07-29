@@ -9,37 +9,83 @@ use std::{
 use crate::{
     error::message,
     preflight::ResolvedProfile,
-    profile::{Architecture, NetworkMode, Profile, WorkspaceAccess, WorkspaceMode},
+    profile::{AgentState, Architecture, NetworkMode, Profile},
 };
 
 use super::plan::{
-    AgentKind, CommandSpec, NetworkExposure, RuntimePlan, WorkspaceMount, WorkspaceMountAccess,
+    AgentKind, AgentStateMount, CommandSpec, NetworkExposure, RuntimePlan, WorkspaceMount,
+    WorkspaceMountAccess,
 };
+
+const CODEX_STATE_GUEST_PATH: &str = "/cloister/agents/codex";
+const WORKSPACE_GUEST_PATH: &str = "/workspace";
 
 /// Produces an inspectable `container run` plan without starting a process.
 pub fn plan_apple_container(
     resolved: &ResolvedProfile,
     container_command: &[OsString],
 ) -> Result<RuntimePlan, RuntimePlanError> {
+    let agents = &resolved.profile().agents;
+    if (agents.codex.enabled && agents.codex.state == AgentState::Shared)
+        || (agents.claude.enabled && agents.claude.state == AgentState::Shared)
+    {
+        return Err(RuntimePlanError::SharedStateRequiresAgentCommand);
+    }
+
+    plan(resolved, Vec::new(), Vec::new(), container_command)
+}
+
+/// Produces an Apple container plan that launches Codex.
+pub fn plan_codex_container(
+    resolved: &ResolvedProfile,
+    shared_state: Option<&std::path::Path>,
+    codex_arguments: &[OsString],
+) -> Result<RuntimePlan, RuntimePlanError> {
+    let profile = resolved.profile();
+    if !profile.agents.codex.enabled {
+        return Err(RuntimePlanError::CodexDisabled);
+    }
+
+    let mut command = Vec::with_capacity(codex_arguments.len() + 1);
+    command.push(OsString::from("codex"));
+    command.extend_from_slice(codex_arguments);
+
+    let (state_mounts, environments) = match profile.agents.codex.state {
+        AgentState::Isolated => (Vec::new(), Vec::new()),
+        AgentState::Shared => {
+            let host = shared_state.ok_or(RuntimePlanError::SharedCodexStateMissing)?;
+            reject_mount_separator(host)?;
+            let mount = AgentStateMount {
+                agent: AgentKind::Codex,
+                host: host.to_owned(),
+                guest: CODEX_STATE_GUEST_PATH.into(),
+            };
+            (
+                vec![mount],
+                vec![("CODEX_HOME", OsString::from(CODEX_STATE_GUEST_PATH))],
+            )
+        }
+    };
+
+    plan(resolved, state_mounts, environments, &command)
+}
+
+fn plan(
+    resolved: &ResolvedProfile,
+    agent_state_mounts: Vec<AgentStateMount>,
+    environments: Vec<(&'static str, OsString)>,
+    container_command: &[OsString],
+) -> Result<RuntimePlan, RuntimePlanError> {
     let profile = resolved.profile();
 
-    if profile.workspace.mode != WorkspaceMode::Bind {
-        return Err(RuntimePlanError::UnsupportedWorkspaceMode);
-    }
     if profile.network.mode != NetworkMode::Default {
         return Err(RuntimePlanError::UnsupportedNetworkMode);
     }
-    reject_mount_separator(&profile.workspace.host)?;
-    reject_mount_separator(&profile.workspace.guest)?;
-
-    let workspace_access = match profile.workspace.access {
-        WorkspaceAccess::ReadOnly => WorkspaceMountAccess::ReadOnly,
-        WorkspaceAccess::ReadWrite => WorkspaceMountAccess::ReadWrite,
-    };
+    reject_mount_separator(resolved.workspace())?;
     let workspace = WorkspaceMount {
-        host: profile.workspace.host.clone(),
-        guest: profile.workspace.guest.clone(),
-        access: workspace_access,
+        host: resolved.workspace().to_owned(),
+        guest: WORKSPACE_GUEST_PATH.into(),
+        access: WorkspaceMountAccess::ReadWrite,
     };
     let enabled_agents = [
         profile.agents.codex.enabled.then_some(AgentKind::Codex),
@@ -48,13 +94,20 @@ pub fn plan_apple_container(
     .into_iter()
     .flatten()
     .collect();
-    let command = build_run_command(profile, &workspace, container_command);
+    let command = build_run_command(
+        profile,
+        &workspace,
+        &agent_state_mounts,
+        &environments,
+        container_command,
+    );
 
     Ok(RuntimePlan {
         profile_name: profile.name.clone(),
         guest_hostname: profile.guest.hostname.clone(),
         network: NetworkExposure::DefaultWithInternetEgress,
         workspace,
+        agent_state_mounts,
         enabled_agents,
         command,
     })
@@ -63,6 +116,8 @@ pub fn plan_apple_container(
 fn build_run_command(
     profile: &Profile,
     workspace: &WorkspaceMount,
+    agent_state_mounts: &[AgentStateMount],
+    environments: &[(&'static str, OsString)],
     container_command: &[OsString],
 ) -> CommandSpec {
     let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
@@ -78,6 +133,9 @@ fn build_run_command(
     command.environment("LANG", &profile.guest.locale);
     command.environment("LC_ALL", &profile.guest.locale);
     command.environment("TZ", &profile.guest.timezone);
+    for (name, value) in environments {
+        command.environment(name, value);
+    }
 
     command.flag("--interactive");
     command.flag("--tty");
@@ -85,6 +143,12 @@ fn build_run_command(
     command.option("--tmpfs", "/tmp");
     command.option("--network", "default");
     command.option("--mount", mount_argument(workspace));
+    for mount in agent_state_mounts {
+        command.option(
+            "--mount",
+            bind_mount_argument(mount.host(), mount.guest(), false),
+        );
+    }
     command.option("--label", format!("org.cloister.profile={}", profile.name));
 
     command.container_command(container_command);
@@ -98,11 +162,23 @@ fn architecture_argument(architecture: Architecture) -> &'static str {
 }
 
 fn mount_argument(workspace: &WorkspaceMount) -> OsString {
+    bind_mount_argument(
+        workspace.host(),
+        workspace.guest(),
+        workspace.access() == WorkspaceMountAccess::ReadOnly,
+    )
+}
+
+fn bind_mount_argument(
+    host: &std::path::Path,
+    guest: &std::path::Path,
+    readonly: bool,
+) -> OsString {
     let mut argument = OsString::from("type=bind,source=");
-    argument.push(workspace.host());
+    argument.push(host);
     argument.push(",target=");
-    argument.push(workspace.guest());
-    if workspace.access() == WorkspaceMountAccess::ReadOnly {
+    argument.push(guest);
+    if readonly {
         argument.push(",readonly");
     }
     argument
@@ -132,8 +208,11 @@ impl ContainerRunCommandBuilder {
         self.options.push(value.as_ref().to_owned());
     }
 
-    fn environment(&mut self, name: &'static str, value: &str) {
-        self.option("--env", format!("{name}={value}"));
+    fn environment(&mut self, name: &'static str, value: impl AsRef<OsStr>) {
+        let mut assignment = OsString::from(name);
+        assignment.push("=");
+        assignment.push(value);
+        self.option("--env", assignment);
     }
 
     fn container_command(&mut self, command: &[OsString]) {
@@ -167,17 +246,16 @@ fn reject_mount_separator(path: &std::path::Path) -> Result<(), RuntimePlanError
 /// Profile setting that cannot be represented safely by the current adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuntimePlanError {
-    UnsupportedWorkspaceMode,
     UnsupportedNetworkMode,
     MountPathContainsSeparator { path: OsString },
+    CodexDisabled,
+    SharedCodexStateMissing,
+    SharedStateRequiresAgentCommand,
 }
 
 impl fmt::Display for RuntimePlanError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedWorkspaceMode => {
-                formatter.write_str(message::WORKSPACE_COPY_NOT_IMPLEMENTED)
-            }
             Self::UnsupportedNetworkMode => {
                 formatter.write_str(message::NETWORK_RESTRICTED_NOT_IMPLEMENTED)
             }
@@ -188,6 +266,13 @@ impl fmt::Display for RuntimePlanError {
                     message::MOUNT_PATH_CONTAINS_SEPARATOR,
                     OsStr::new(path)
                 )
+            }
+            Self::CodexDisabled => formatter.write_str(message::CODEX_DISABLED),
+            Self::SharedCodexStateMissing => {
+                formatter.write_str(message::SHARED_CODEX_STATE_MISSING)
+            }
+            Self::SharedStateRequiresAgentCommand => {
+                formatter.write_str(message::SHARED_STATE_REQUIRES_AGENT_COMMAND)
             }
         }
     }

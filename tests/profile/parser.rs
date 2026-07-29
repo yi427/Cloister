@@ -1,6 +1,6 @@
 //! Profile TOML parser integration tests.
 
-use cloister::profile::{Architecture, NetworkMode, WorkspaceAccess, WorkspaceMode, parse_profile};
+use cloister::profile::{Architecture, NetworkMode, parse_profile};
 
 const DEFAULT_PROFILE: &str = include_str!("../fixtures/profiles/valid/default.toml");
 const INVALID_MEMORY: &str = include_str!("../fixtures/profiles/invalid/invalid-memory.toml");
@@ -9,16 +9,14 @@ const ZERO_CPUS: &str = include_str!("../fixtures/profiles/invalid/zero-cpus.tom
 const EXAMPLE_PROFILE: &str = include_str!("../../examples/profile.toml");
 
 #[test]
-fn parses_a_complete_profile_v1() {
+fn parses_a_complete_profile_v2() {
     let profile = parse_profile(DEFAULT_PROFILE).expect("default profile should parse");
 
-    assert_eq!(profile.schema_version, 1);
+    assert_eq!(profile.schema_version, 2);
     assert_eq!(profile.name, "rust-default");
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
-    assert_eq!(profile.workspace.mode, WorkspaceMode::Bind);
-    assert_eq!(profile.workspace.access, WorkspaceAccess::ReadWrite);
     assert_eq!(profile.network.mode, NetworkMode::Default);
     assert!(profile.agents.codex.enabled);
     assert!(profile.agents.claude.enabled);

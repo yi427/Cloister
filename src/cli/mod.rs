@@ -1,5 +1,6 @@
 //! Command-line interface for Cloister.
 
+mod codex;
 mod host;
 mod profile;
 mod run;
@@ -10,6 +11,7 @@ use clap::{Parser, Subcommand};
 
 use crate::error::message;
 
+use self::codex::CodexArgs;
 use self::host::HostArgs;
 use self::profile::ProfileArgs;
 use self::run::RunArgs;
@@ -29,6 +31,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run Codex in the current project with shared Cloister-managed state.
+    Codex(CodexArgs),
     /// Serve or exercise the host shell MCP bridge.
     Host(HostArgs),
     /// Inspect and manage environment profiles.
@@ -51,6 +55,7 @@ pub async fn run() -> ExitCode {
 impl Command {
     async fn execute(self) -> Result<ExitCode, CliError> {
         match self {
+            Self::Codex(arguments) => arguments.execute().await.map_err(CliError::Codex),
             Self::Host(arguments) => arguments
                 .execute()
                 .await
@@ -67,6 +72,7 @@ impl Command {
 
 #[derive(Debug)]
 enum CliError {
+    Codex(codex::CodexCommandError),
     Host(host::HostCommandError),
     Profile(profile::ProfileCommandError),
     Run(run::RunCommandError),
@@ -75,6 +81,7 @@ enum CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Codex(error) => error.fmt(formatter),
             Self::Host(error) => error.fmt(formatter),
             Self::Profile(error) => error.fmt(formatter),
             Self::Run(error) => error.fmt(formatter),
@@ -85,6 +92,7 @@ impl fmt::Display for CliError {
 impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Codex(error) => Some(error),
             Self::Host(error) => Some(error),
             Self::Profile(error) => Some(error),
             Self::Run(error) => Some(error),

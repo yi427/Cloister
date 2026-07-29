@@ -66,9 +66,11 @@ Profiles are versioned TOML documents. The first schema will cover:
 - image reference and architecture;
 - CPU and memory limits;
 - hostname, guest user, locale, and timezone;
-- workspace mode, path, guest target, and access level;
 - network policy;
 - enabled agents and their state policy.
+
+ADR 0003 later moved workspace selection out of the Profile. The CLI selects a
+host directory for each invocation and mounts it at `/workspace`.
 
 Unknown schema versions and unknown security-sensitive values must fail closed.
 The example profile is not yet a stable public schema.

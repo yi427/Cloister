@@ -1,7 +1,6 @@
-schema_version = 1
+schema_version = 2
 name = "zero-cpus"
 image = { reference = "cloister/rust-node:dev", architecture = "arm64" }
 guest = { hostname = "cloister", cpus = 0, memory = "8G", user = "cloister", locale = "zh_CN.UTF-8", timezone = "Asia/Shanghai" }
-workspace = { mode = "bind", host = ".", guest = "/workspace", access = "read-write" }
 network = { mode = "default" }
 agents = { codex = { enabled = true, state = "isolated" }, claude = { enabled = true, state = "isolated" } }

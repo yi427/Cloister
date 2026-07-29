@@ -13,6 +13,7 @@ pub struct RuntimePlan {
     pub(super) guest_hostname: String,
     pub(super) network: NetworkExposure,
     pub(super) workspace: WorkspaceMount,
+    pub(super) agent_state_mounts: Vec<AgentStateMount>,
     pub(super) enabled_agents: Vec<AgentKind>,
     pub(super) command: CommandSpec,
 }
@@ -32,6 +33,10 @@ impl RuntimePlan {
 
     pub fn workspace(&self) -> &WorkspaceMount {
         &self.workspace
+    }
+
+    pub fn agent_state_mounts(&self) -> &[AgentStateMount] {
+        &self.agent_state_mounts
     }
 
     pub fn enabled_agents(&self) -> &[AgentKind] {
@@ -63,10 +68,19 @@ impl fmt::Display for RuntimePlan {
         )?;
         writeln!(formatter, "SSH agent forwarding: disabled")?;
         writeln!(formatter, "Host credential mounts: none")?;
-        writeln!(
-            formatter,
-            "Agent state: isolated policy (storage provisioning deferred)"
-        )?;
+        if self.agent_state_mounts.is_empty() {
+            writeln!(formatter, "Agent state mounts: none (ephemeral)")?;
+        } else {
+            for mount in &self.agent_state_mounts {
+                writeln!(
+                    formatter,
+                    "{} state: {} -> {} (shared across projects)",
+                    mount.agent,
+                    mount.host.display(),
+                    mount.guest.display()
+                )?;
+            }
+        }
 
         write!(formatter, "Enabled agents: ")?;
         for (index, agent) in self.enabled_agents.iter().enumerate() {
@@ -85,6 +99,28 @@ impl fmt::Display for RuntimePlan {
         }
 
         Ok(())
+    }
+}
+
+/// Cloister-managed persistent state exposed to one coding agent.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentStateMount {
+    pub(super) agent: AgentKind,
+    pub(super) host: PathBuf,
+    pub(super) guest: PathBuf,
+}
+
+impl AgentStateMount {
+    pub const fn agent(&self) -> AgentKind {
+        self.agent
+    }
+
+    pub fn host(&self) -> &Path {
+        &self.host
+    }
+
+    pub fn guest(&self) -> &Path {
+        &self.guest
     }
 }
 

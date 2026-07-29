@@ -42,7 +42,7 @@ fn prints_an_inspectable_plan_without_running_container() {
     assert!(stdout.contains("Network: default (outbound internet enabled)"));
     assert!(stdout.contains("SSH agent forwarding: disabled"));
     assert!(stdout.contains("Host credential mounts: none"));
-    assert!(stdout.contains("Agent state: isolated policy (storage provisioning deferred)"));
+    assert!(stdout.contains("Agent state mounts: none (ephemeral)"));
     assert!(stdout.contains("Lifecycle: run and remove after exit"));
     assert!(stdout.contains("program: \"container\""));
     assert!(stdout.contains("\"run\""));
@@ -110,6 +110,8 @@ fn reports_a_missing_workspace_during_preflight() {
         "run",
         "--profile",
         path.to_str().expect("UTF-8 path"),
+        "--workspace",
+        "does-not-exist",
         "--dry-run",
     ]);
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
@@ -127,6 +129,8 @@ fn plans_the_directly_runnable_smoke_example() {
         "run",
         "--profile",
         path.to_str().expect("UTF-8 path"),
+        "--workspace",
+        example(".").to_str().expect("UTF-8 path"),
         "--dry-run",
         "--",
         "/bin/sh",

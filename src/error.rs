@@ -13,19 +13,29 @@ pub(crate) mod message {
     pub const PROFILE_VALIDATION_FAILED: &str = "profile validation failed";
     pub const WORKSPACE_PATH_RESOLUTION_FAILED: &str = "failed to resolve workspace path";
     pub const WORKSPACE_PATH_NOT_DIRECTORY: &str = "workspace path is not a directory";
+    pub const WORKSPACE_PATH_IS_ROOT: &str = "workspace must not be the filesystem root";
 
     pub const UNSUPPORTED_SCHEMA_VERSION: &str = "schema_version is not supported";
     pub const VALUE_MUST_NOT_BE_BLANK: &str = "must not be blank";
-    pub const PATH_MUST_NOT_BE_EMPTY: &str = "must not be empty";
-    pub const PATH_MUST_BE_ABSOLUTE: &str = "must be absolute";
-    pub const PATH_MUST_NOT_BE_ROOT: &str = "must not be the filesystem root";
-    pub const PATH_MUST_NOT_CONTAIN_PARENT: &str = "must not contain '..'";
-    pub const WORKSPACE_COPY_NOT_IMPLEMENTED: &str = "copy workspace mode is not implemented";
     pub const NETWORK_RESTRICTED_NOT_IMPLEMENTED: &str =
         "restricted network mode is not implemented";
     pub const AT_LEAST_ONE_AGENT_REQUIRED: &str = "at least one coding agent must be enabled";
     pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "workspace mount paths must not contain ','";
     pub const RUNTIME_START_FAILED: &str = "failed to start runtime";
+    pub const CODEX_DISABLED: &str = "Codex is disabled by the selected profile";
+    pub const SHARED_CODEX_STATE_MISSING: &str =
+        "shared Codex state requires a Cloister-managed host directory";
+    pub const SHARED_STATE_REQUIRES_AGENT_COMMAND: &str =
+        "shared agent state requires an agent-specific command such as 'cloister codex'";
+    pub const CURRENT_DIRECTORY_FAILED: &str = "failed to resolve the current directory";
+    pub const HOME_DIRECTORY_MISSING: &str =
+        "HOME is not set; cannot locate Cloister configuration or state";
+    pub const AGENT_STATE_CREATE_FAILED: &str = "failed to create agent state directory";
+    pub const AGENT_STATE_METADATA_FAILED: &str = "failed to inspect agent state directory";
+    pub const AGENT_STATE_INVALID: &str =
+        "agent state path must be a real directory, not a file or symbolic link";
+    pub const AGENT_STATE_PERMISSIONS_FAILED: &str =
+        "failed to restrict agent state directory permissions";
 
     pub const BRIDGE_TOKEN_READ_FAILED: &str = "failed to read host bridge token";
     pub const BRIDGE_TOKEN_CREATE_FAILED: &str = "failed to create host bridge token";

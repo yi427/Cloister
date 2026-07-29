@@ -1,15 +1,12 @@
-//! Public Profile V1 model integration tests.
-
-use std::path::PathBuf;
+//! Public Profile V2 model integration tests.
 
 use cloister::profile::{
     AgentProfile, AgentProfiles, AgentState, Architecture, CpuCount, GuestProfile, ImageProfile,
-    MemorySize, NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION, Profile, WorkspaceAccess,
-    WorkspaceMode, WorkspaceProfile,
+    MemorySize, NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION, Profile,
 };
 
 #[test]
-fn constructs_profile_v1_through_the_public_api() {
+fn constructs_profile_v2_through_the_public_api() {
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
         name: "rust-default".to_owned(),
@@ -24,12 +21,6 @@ fn constructs_profile_v1_through_the_public_api() {
             user: "cloister".to_owned(),
             locale: "zh_CN.UTF-8".to_owned(),
             timezone: "Asia/Shanghai".to_owned(),
-        },
-        workspace: WorkspaceProfile {
-            mode: WorkspaceMode::Bind,
-            host: PathBuf::from("."),
-            guest: PathBuf::from("/workspace"),
-            access: WorkspaceAccess::ReadWrite,
         },
         network: NetworkProfile {
             mode: NetworkMode::Default,
@@ -46,12 +37,10 @@ fn constructs_profile_v1_through_the_public_api() {
         },
     };
 
-    assert_eq!(profile.schema_version, 1);
+    assert_eq!(profile.schema_version, 2);
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
-    assert_eq!(profile.workspace.mode, WorkspaceMode::Bind);
-    assert_eq!(profile.workspace.access, WorkspaceAccess::ReadWrite);
     assert_eq!(profile.network.mode, NetworkMode::Default);
     assert_eq!(profile.agents.codex.state, AgentState::Isolated);
 }

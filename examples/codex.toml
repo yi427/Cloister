@@ -1,5 +1,6 @@
+# Profile V2 example for: cloister codex --profile examples/codex.toml
 schema_version = 2
-name = "restricted-network"
+name = "codex-default"
 
 [image]
 reference = "cloister/rust-node:dev"
@@ -14,11 +15,11 @@ locale = "zh_CN.UTF-8"
 timezone = "Asia/Shanghai"
 
 [network]
-mode = "restricted"
+mode = "default"
 
 [agents.codex]
 enabled = true
-state = "isolated"
+state = "shared"
 
 [agents.claude]
 enabled = true

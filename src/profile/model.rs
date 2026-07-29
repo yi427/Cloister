@@ -4,7 +4,6 @@ use std::{
     error::Error,
     fmt,
     num::{NonZeroU16, NonZeroU64},
-    path::PathBuf,
     str::FromStr,
 };
 
@@ -13,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 1;
+pub const PROFILE_SCHEMA_VERSION: u32 = 2;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -27,8 +26,6 @@ pub struct Profile {
     pub image: ImageProfile,
     #[garde(dive)]
     pub guest: GuestProfile,
-    #[garde(dive)]
-    pub workspace: WorkspaceProfile,
     #[garde(dive)]
     pub network: NetworkProfile,
     #[garde(custom(super::validation::validate_agents_enabled))]
@@ -166,7 +163,7 @@ impl<'de> Deserialize<'de> for MemorySize {
     }
 }
 
-/// Reason a memory size could not be represented by Profile V1.
+/// Reason a memory size could not be represented by Profile V2.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParseMemorySizeError {
     InvalidFormat,
@@ -186,36 +183,6 @@ impl fmt::Display for ParseMemorySizeError {
 
 impl Error for ParseMemorySizeError {}
 
-/// Host project exposure inside the guest.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
-#[serde(deny_unknown_fields)]
-pub struct WorkspaceProfile {
-    #[garde(custom(super::validation::validate_workspace_mode))]
-    pub mode: WorkspaceMode,
-    #[garde(custom(super::validation::validate_host_workspace_path))]
-    pub host: PathBuf,
-    #[garde(custom(super::validation::validate_guest_workspace_path))]
-    pub guest: PathBuf,
-    #[garde(skip)]
-    pub access: WorkspaceAccess,
-}
-
-/// How project files move between the host and guest.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkspaceMode {
-    Bind,
-    Copy,
-}
-
-/// Access granted to the guest for workspace files.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum WorkspaceAccess {
-    ReadOnly,
-    ReadWrite,
-}
-
 /// Network policy requested for the environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(deny_unknown_fields)]
@@ -224,7 +191,7 @@ pub struct NetworkProfile {
     pub mode: NetworkMode,
 }
 
-/// Network modes represented by Profile V1.
+/// Network modes represented by the current Profile schema.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkMode {
@@ -253,6 +220,7 @@ pub struct AgentProfile {
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
     Isolated,
+    Shared,
 }
 
 #[cfg(test)]

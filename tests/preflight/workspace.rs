@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use cloister::{
-    preflight::{PreflightError, resolve_profile},
+    preflight::{PreflightError, resolve_profile_workspace},
     profile::load_profile,
 };
 
@@ -12,31 +12,36 @@ fn fixture(relative_path: impl AsRef<Path>) -> PathBuf {
 }
 
 #[test]
-fn resolves_relative_workspace_from_the_profile_directory() {
+fn resolves_the_workspace_selected_for_this_execution() {
     let path = fixture("valid/default.toml");
     let profile = load_profile(&path).expect("default profile should load");
-    let resolved = resolve_profile(profile, &path).expect("workspace should resolve");
+    let workspace = fixture("preflight");
+
+    let resolved = resolve_profile_workspace(profile, &path, &workspace)
+        .expect("explicit workspace should resolve");
 
     assert_eq!(
-        resolved.profile().workspace.host,
-        path.parent()
-            .expect("fixture should have a parent")
+        resolved.workspace(),
+        workspace
             .canonicalize()
-            .expect("fixture directory should resolve")
+            .expect("workspace should resolve")
+            .as_path()
     );
     assert_eq!(
         resolved.source(),
-        path.canonicalize().expect("fixture should resolve")
+        path.canonicalize()
+            .expect("profile should resolve")
+            .as_path()
     );
 }
 
 #[test]
 fn rejects_a_workspace_that_is_a_file() {
     let path = fixture("valid/default.toml");
-    let mut profile = load_profile(&path).expect("default profile should load");
-    profile.workspace.host = PathBuf::from("default.toml");
+    let profile = load_profile(&path).expect("default profile should load");
 
-    let error = resolve_profile(profile, path).expect_err("workspace file should fail");
+    let error =
+        resolve_profile_workspace(profile, &path, &path).expect_err("workspace file should fail");
 
     assert!(matches!(
         error,
@@ -47,10 +52,21 @@ fn rejects_a_workspace_that_is_a_file() {
 #[test]
 fn rejects_a_workspace_that_does_not_exist() {
     let path = fixture("valid/default.toml");
-    let mut profile = load_profile(&path).expect("default profile should load");
-    profile.workspace.host = PathBuf::from("does-not-exist");
+    let profile = load_profile(&path).expect("default profile should load");
 
-    let error = resolve_profile(profile, path).expect_err("missing workspace should fail");
+    let error = resolve_profile_workspace(profile, &path, fixture("does-not-exist"))
+        .expect_err("missing workspace should fail");
 
     assert!(matches!(error, PreflightError::WorkspacePath { .. }));
+}
+
+#[test]
+fn rejects_the_host_filesystem_root_as_a_workspace() {
+    let path = fixture("valid/default.toml");
+    let profile = load_profile(&path).expect("default profile should load");
+
+    let error = resolve_profile_workspace(profile, path, Path::new("/"))
+        .expect_err("host root should fail");
+
+    assert!(matches!(error, PreflightError::WorkspaceIsRoot { .. }));
 }

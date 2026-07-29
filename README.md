@@ -5,8 +5,9 @@ coding agents. It will use Apple's `container` CLI to run Codex, Claude Code,
 and development toolchains inside lightweight Linux virtual machines on Apple
 silicon.
 
-The project is currently at the first executable-runtime stage. The Rust binary
-can load profiles, produce inspectable runtime plans, run commands through Apple
+The project now has a first natural Codex workflow. The Rust binary can launch
+Codex in the current project with persistent Cloister-managed state, load
+profiles, produce inspectable runtime plans, run commands through Apple
 `container`, and serve an authenticated host-command bridge.
 
 ## MVP boundary
@@ -15,7 +16,7 @@ The first useful version will:
 
 - read a versioned TOML profile;
 - start an ARM64 Linux environment through Apple `container`;
-- apply CPU, memory, locale, timezone, user, and workspace settings;
+- apply CPU, memory, locale, timezone, and guest-user settings;
 - support a live bind-mounted workspace and an isolated copy workspace;
 - keep each environment's agent state separate from host credentials;
 - optionally expose an authenticated host shell escape hatch;
@@ -38,6 +39,81 @@ The current profile shape is illustrated in
 decisions are recorded in
 [`docs/adr/0001-development-environment.md`](docs/adr/0001-development-environment.md).
 
+Build the current local development image:
+
+```sh
+make image
+```
+
+This produces `cloister/rust-node:dev` with Node.js, Rust, Git, Codex CLI, and
+Claude Code installed. The tool versions are pinned in
+[`images/rust-node/Containerfile`](images/rust-node/Containerfile). The image
+uses a non-root `cloister` user and keeps its temporary home and CLI state under
+the guest `/tmp` tmpfs. It does not contain or mount host credentials.
+
+Run Codex in the current project:
+
+```sh
+cd /path/to/project
+cloister codex
+```
+
+When running from this repository during development, use:
+
+```sh
+cargo run -- codex
+```
+
+The command maps the current directory to `/workspace`, reuses
+`cloister/rust-node:dev`, and keeps Codex state in
+`~/.local/share/cloister/agents/codex`. Cloister creates that directory with
+owner-only permissions and mounts it as `CODEX_HOME`; it never mounts the
+host's existing `~/.codex`.
+
+Inspect this high-level launch without starting a container:
+
+```sh
+cargo run -- codex --dry-run
+```
+
+Pass arguments to Codex after `--`:
+
+```sh
+cargo run -- codex -- --version
+```
+
+Profile selection is explicit `--profile`, otherwise
+`~/.config/cloister/profile.toml` is required. To create the default Profile
+from the documented example:
+
+```sh
+mkdir -p ~/.config/cloister
+cp examples/codex.toml ~/.config/cloister/profile.toml
+```
+
+`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. A Codex Profile can set
+`state = "isolated"` for temporary per-container state instead of the default
+cross-project shared state. Shared state can contain authentication tokens,
+configuration, history, and skills, so it must be treated as a secret.
+
+Workspace selection is intentionally not part of the Profile. Both high-level
+and low-level commands mount the current directory at `/workspace` by default.
+Select another project for one invocation with:
+
+```sh
+cargo run -- codex --workspace /path/to/project
+cargo run -- run --profile examples/profile.toml \
+  --workspace /path/to/project -- /bin/sh
+```
+
+Verify the local toolchain through Cloister:
+
+```sh
+cargo run -- run --profile examples/profile.toml -- /bin/bash -lc \
+  'node --version && rustc --version && cargo --version && \
+   git --version && codex --version && claude --version'
+```
+
 Check the example profile through the CLI:
 
 ```sh
@@ -53,20 +129,20 @@ cargo run -- run --profile examples/profile.toml --dry-run -- /bin/sh
 Run a command in a temporary environment:
 
 ```sh
-cargo run -- run --profile examples/smoke.toml -- /bin/sh
+cargo run -- run --profile examples/smoke.toml \
+  --workspace examples -- /bin/sh
 ```
 
 Verify the project mount non-interactively:
 
 ```sh
-cargo run -- run --profile examples/smoke.toml -- \
+cargo run -- run --profile examples/smoke.toml --workspace examples -- \
   /bin/sh -lc 'pwd && test -f smoke.toml && echo "workspace ready"'
 ```
 
-Relative `workspace.host` values are resolved from the directory containing the
-profile file, not from the shell's current working directory. The smoke profile
-therefore mounts the `examples/` directory that contains it. It intentionally
-uses a public Debian image and does not contain Codex or Claude Code.
+The smoke command explicitly selects the `examples/` directory. Its Profile
+only describes the guest environment and agent policy. It intentionally uses a
+public Debian image and does not contain Codex or Claude Code.
 
 The current Host Bridge prototype exposes one MCP tool, `host.exec`. Start it
 with an unused token path:
@@ -99,7 +175,7 @@ src/
 ├── lib.rs                  Library entry point
 ├── main.rs                 Terminal application entry point
 ├── error.rs                Centralized error messages
-├── cli/                    clap command definitions and dispatch
+├── cli/                    clap commands, including the natural Codex entry point
 ├── host_bridge/            Authenticated host shell MCP bridge
 ├── preflight/              Host path resolution and checks
 ├── runtime/                Inspectable plans and container arguments

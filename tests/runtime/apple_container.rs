@@ -1,13 +1,18 @@
 use std::{
     ffi::{OsStr, OsString},
+    fs,
     path::{Path, PathBuf},
 };
 
 use cloister::{
-    preflight::resolve_profile,
-    profile::{NetworkMode, WorkspaceAccess, WorkspaceMode, load_profile},
-    runtime::{AgentKind, NetworkExposure, WorkspaceMountAccess, plan_apple_container},
+    preflight::resolve_profile_workspace,
+    profile::{AgentState, NetworkMode, load_profile},
+    runtime::{
+        AgentKind, NetworkExposure, WorkspaceMountAccess, plan_apple_container,
+        plan_codex_container,
+    },
 };
+use tempfile::tempdir;
 
 fn fixture(relative_path: impl AsRef<Path>) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -18,7 +23,8 @@ fn fixture(relative_path: impl AsRef<Path>) -> PathBuf {
 fn default_plan() -> cloister::runtime::RuntimePlan {
     let path = fixture("valid/default.toml");
     let profile = load_profile(&path).expect("default profile should load");
-    let resolved = resolve_profile(profile, path).expect("default workspace should resolve");
+    let resolved = resolve_profile_workspace(profile, &path, fixture("valid"))
+        .expect("default workspace should resolve");
 
     plan_apple_container(&resolved, &[]).expect("default profile should produce a plan")
 }
@@ -101,24 +107,14 @@ fn creates_an_explicit_read_write_bind_mount() {
 }
 
 #[test]
-fn adds_readonly_to_a_read_only_workspace_mount() {
-    let path = fixture("valid/default.toml");
-    let mut profile = load_profile(&path).expect("default profile should load");
-    profile.workspace.access = WorkspaceAccess::ReadOnly;
-    let resolved = resolve_profile(profile, path).expect("workspace should resolve");
-    let plan = plan_apple_container(&resolved, &[]).expect("read-only workspace should plan");
-    let mount = argument_after(plan.command().arguments(), "--mount").to_string_lossy();
-
-    assert_eq!(plan.workspace().access(), WorkspaceMountAccess::ReadOnly);
-    assert!(mount.ends_with(",readonly"));
-}
-
-#[test]
 fn rejects_a_mount_path_that_container_cannot_represent() {
     let path = fixture("valid/default.toml");
-    let mut profile = load_profile(&path).expect("default profile should load");
-    profile.workspace.guest = PathBuf::from("/work,space");
-    let resolved = resolve_profile(profile, path).expect("host workspace should resolve");
+    let profile = load_profile(&path).expect("default profile should load");
+    let directory = tempdir().expect("temporary directory should exist");
+    let workspace = directory.path().join("work,space");
+    fs::create_dir(&workspace).expect("workspace should be created");
+    let resolved = resolve_profile_workspace(profile, &path, workspace)
+        .expect("host workspace should resolve");
 
     let error = plan_apple_container(&resolved, &[]).expect_err("comma mount path should fail");
 
@@ -128,19 +124,11 @@ fn rejects_a_mount_path_that_container_cannot_represent() {
 #[test]
 fn fails_closed_for_unsupported_runtime_policies() {
     let path = fixture("valid/default.toml");
-    let mut copy_profile = load_profile(&path).expect("default profile should load");
-    copy_profile.workspace.mode = WorkspaceMode::Copy;
-    let copy_resolved =
-        resolve_profile(copy_profile, &path).expect("host workspace should resolve");
-
-    let copy_error =
-        plan_apple_container(&copy_resolved, &[]).expect_err("copy mode should not produce a plan");
-    assert!(copy_error.to_string().contains("copy workspace mode"));
-
     let mut restricted_profile = load_profile(&path).expect("default profile should load");
     restricted_profile.network.mode = NetworkMode::Restricted;
     let restricted_resolved =
-        resolve_profile(restricted_profile, path).expect("host workspace should resolve");
+        resolve_profile_workspace(restricted_profile, &path, fixture("valid"))
+            .expect("host workspace should resolve");
 
     let restricted_error = plan_apple_container(&restricted_resolved, &[])
         .expect_err("restricted network should not produce a plan");
@@ -155,7 +143,8 @@ fn fails_closed_for_unsupported_runtime_policies() {
 fn appends_the_container_command_without_shell_parsing() {
     let path = fixture("valid/default.toml");
     let profile = load_profile(&path).expect("default profile should load");
-    let resolved = resolve_profile(profile, path).expect("default workspace should resolve");
+    let resolved = resolve_profile_workspace(profile, &path, fixture("valid"))
+        .expect("default workspace should resolve");
     let command = [
         OsString::from("/bin/sh"),
         OsString::from("-lc"),
@@ -172,4 +161,64 @@ fn appends_the_container_command_without_shell_parsing() {
         &arguments[arguments.len() - command.len()..],
         command.as_slice()
     );
+}
+
+#[test]
+fn mounts_shared_codex_state_and_sets_codex_home() {
+    let path = fixture("valid/default.toml");
+    let mut profile = load_profile(&path).expect("default profile should load");
+    profile.agents.codex.state = AgentState::Shared;
+    let resolved = resolve_profile_workspace(profile, &path, fixture("valid"))
+        .expect("default workspace should resolve");
+    let state = fixture("valid");
+    let codex_arguments = [OsString::from("--version")];
+
+    let plan = plan_codex_container(&resolved, Some(&state), &codex_arguments)
+        .expect("shared Codex state should produce a plan");
+    let arguments = plan.command().arguments();
+    let mounts = arguments
+        .windows(2)
+        .filter(|pair| pair[0] == "--mount")
+        .map(|pair| pair[1].to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(plan.agent_state_mounts().len(), 1);
+    assert_eq!(plan.agent_state_mounts()[0].agent(), AgentKind::Codex);
+    assert_eq!(plan.agent_state_mounts()[0].host(), state);
+    assert_eq!(
+        plan.agent_state_mounts()[0].guest(),
+        Path::new("/cloister/agents/codex")
+    );
+    assert_eq!(mounts.len(), 2);
+    assert_eq!(
+        mounts[1],
+        format!(
+            "type=bind,source={},target=/cloister/agents/codex",
+            state.display()
+        )
+    );
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| { pair[0] == "--env" && pair[1] == "CODEX_HOME=/cloister/agents/codex" })
+    );
+    assert!(arguments.ends_with(&[
+        OsString::from("cloister/rust-node:dev"),
+        OsString::from("codex"),
+        OsString::from("--version"),
+    ]));
+}
+
+#[test]
+fn generic_run_rejects_shared_agent_state() {
+    let path = fixture("valid/default.toml");
+    let mut profile = load_profile(&path).expect("default profile should load");
+    profile.agents.codex.state = AgentState::Shared;
+    let resolved = resolve_profile_workspace(profile, &path, fixture("valid"))
+        .expect("default workspace should resolve");
+
+    let error = plan_apple_container(&resolved, &[])
+        .expect_err("generic run must not silently ignore shared state");
+
+    assert!(error.to_string().contains("cloister codex"));
 }

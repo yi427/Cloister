@@ -1,0 +1,72 @@
+FROM docker.io/library/node:24.18.0-bookworm-slim
+
+ARG RUST_VERSION=1.97.1
+ARG CODEX_VERSION=0.146.0
+ARG CLAUDE_CODE_VERSION=2.1.220
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        bash \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        libssl-dev \
+        locales \
+        pkg-config \
+        ripgrep \
+        tzdata \
+    && sed -i 's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install --global \
+        "@openai/codex@${CODEX_VERSION}" \
+        "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && npm cache clean --force
+
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:${PATH}
+
+RUN curl --proto '=https' --tlsv1.2 --silent --show-error --fail \
+        --output /tmp/rustup-init.sh \
+        https://sh.rustup.rs \
+    && sh /tmp/rustup-init.sh \
+            --default-toolchain "${RUST_VERSION}" \
+            --no-modify-path \
+            --profile minimal \
+            -y \
+    && rm /tmp/rustup-init.sh \
+    && chmod -R a+rX "${RUSTUP_HOME}" "${CARGO_HOME}"
+
+RUN groupadd --gid 10001 cloister \
+    && useradd \
+        --create-home \
+        --gid cloister \
+        --shell /bin/bash \
+        --uid 10001 \
+        cloister \
+    && mkdir -p /workspace /cloister/agents/codex \
+    && chown -R cloister:cloister /workspace /cloister
+
+COPY entrypoint.sh /usr/local/bin/cloister-entrypoint
+COPY profile.sh /etc/profile.d/cloister.sh
+RUN chmod 0755 /usr/local/bin/cloister-entrypoint \
+    && chmod 0644 /etc/profile.d/cloister.sh
+
+ENV HOME=/tmp/cloister/home
+ENV CARGO_HOME=/tmp/cloister/cargo
+ENV CODEX_HOME=/tmp/cloister/codex
+ENV DISABLE_AUTOUPDATER=1
+ENV LANG=zh_CN.UTF-8
+ENV LC_ALL=zh_CN.UTF-8
+ENV TZ=Asia/Shanghai
+
+USER cloister
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/cloister-entrypoint"]
+CMD ["/bin/bash"]
