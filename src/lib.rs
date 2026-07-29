@@ -2,4 +2,5 @@
 
 mod error;
 
+pub mod cli;
 pub mod profile;

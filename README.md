@@ -6,7 +6,7 @@ and development toolchains inside lightweight Linux virtual machines on Apple
 silicon.
 
 The project is currently at the environment-definition stage. The Rust binary
-is only a placeholder; it does not create or manage containers yet.
+can load and validate profiles, but it does not create or manage containers yet.
 
 ## MVP boundary
 
@@ -36,6 +36,12 @@ The current profile shape is illustrated in
 decisions are recorded in
 [`docs/adr/0001-development-environment.md`](docs/adr/0001-development-environment.md).
 
+Check the example profile through the CLI:
+
+```sh
+cargo run -- profile check examples/profile.toml
+```
+
 ## Project layout
 
 ```text
@@ -43,8 +49,10 @@ src/
 ├── lib.rs                  Library entry point
 ├── main.rs                 Terminal application entry point
 ├── error.rs                Centralized error messages
+├── cli/                    clap command definitions and dispatch
 └── profile/
     ├── mod.rs              Profile module boundary
+    ├── loader.rs           File reading, parsing, and validation pipeline
     ├── model.rs            Versioned profile data model
     ├── parser.rs           Side-effect-free parsing
     └── validation.rs       Fail-closed semantic validation

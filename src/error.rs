@@ -1,11 +1,15 @@
 //! Centralized user-facing error messages.
 
 pub(crate) mod message {
+    pub const CLI_ERROR_PREFIX: &str = "error";
+
     pub const MEMORY_INVALID_FORMAT: &str = "memory must be a positive integer followed by M or G";
     pub const MEMORY_MUST_BE_NON_ZERO: &str = "memory must be greater than zero";
     pub const MEMORY_OVERFLOW: &str = "memory is too large";
 
     pub const PROFILE_PARSE_FAILED: &str = "failed to parse profile";
+    pub const PROFILE_READ_FAILED: &str = "failed to read profile";
+    pub const PROFILE_VALIDATION_FAILED: &str = "profile validation failed";
 
     pub const UNSUPPORTED_SCHEMA_VERSION: &str = "schema_version is not supported";
     pub const VALUE_MUST_NOT_BE_BLANK: &str = "must not be blank";

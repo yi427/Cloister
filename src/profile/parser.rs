@@ -30,6 +30,10 @@ impl ParseProfileError {
     pub fn span(&self) -> Option<Range<usize>> {
         self.source.span()
     }
+
+    pub(super) fn diagnostic(&self) -> &toml::de::Error {
+        &self.source
+    }
 }
 
 impl From<toml::de::Error> for ParseProfileError {

@@ -1,6 +1,5 @@
-fn main() {
-    println!(
-        "cloister {}: environment management is not implemented yet",
-        env!("CARGO_PKG_VERSION")
-    );
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    cloister::cli::run()
 }

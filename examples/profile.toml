@@ -1,4 +1,4 @@
-# Profile V1 example. CLI parsing is not implemented yet.
+# Profile V1 example. Check it with: cargo run -- profile check examples/profile.toml
 schema_version = 1
 name = "rust-default"
 
