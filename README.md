@@ -36,6 +36,16 @@ The current profile shape is illustrated in
 decisions are recorded in
 [`docs/adr/0001-development-environment.md`](docs/adr/0001-development-environment.md).
 
+## Project layout
+
+```text
+src/             Rust application code and module unit tests
+tests/           Cross-module and CLI integration tests
+tests/fixtures/  Deterministic test inputs and expected outputs
+examples/        User-facing configuration examples
+docs/adr/        Architecture decision records
+```
+
 ## Local verification
 
 ```sh

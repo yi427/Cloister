@@ -17,6 +17,10 @@ over hidden defaults.
 
 - Keep changes small and reviewable in Git.
 - Do not commit local profiles, credentials, runtime state, or agent transcripts.
+- Keep focused module tests beside their Rust modules and put public-behavior,
+  cross-module, and CLI tests under `tests/`.
+- Store deterministic test data under `tests/fixtures/`; never use real
+  credentials, home-directory state, or machine-specific absolute paths there.
 - Run `cargo fmt --check`, `cargo check`, `cargo test`, and
   `cargo clippy --all-targets -- -D warnings` before considering a Rust change
   complete.
