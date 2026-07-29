@@ -10,7 +10,9 @@ Profile parser samples are organized by expected result:
 profiles/
   valid/
   invalid/
+  preflight/
 ```
 
 Valid fixtures represent the supported document shape; invalid fixtures target
-one rejected condition each.
+one rejected parsing or static-validation condition each. Preflight fixtures
+parse successfully but target a host-dependent failure.

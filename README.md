@@ -42,6 +42,15 @@ Check the example profile through the CLI:
 cargo run -- profile check examples/profile.toml
 ```
 
+Inspect the Apple container command plan without starting a virtual machine:
+
+```sh
+cargo run -- run --profile examples/profile.toml --dry-run
+```
+
+Relative `workspace.host` values are resolved from the directory containing the
+profile file, not from the shell's current working directory.
+
 ## Project layout
 
 ```text
@@ -50,6 +59,8 @@ src/
 ├── main.rs                 Terminal application entry point
 ├── error.rs                Centralized error messages
 ├── cli/                    clap command definitions and dispatch
+├── preflight/              Host path resolution and checks
+├── runtime/                Inspectable plans and container arguments
 └── profile/
     ├── mod.rs              Profile module boundary
     ├── loader.rs           File reading, parsing, and validation pipeline

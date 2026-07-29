@@ -1,4 +1,6 @@
-# Profile V1 example. Check it with: cargo run -- profile check examples/profile.toml
+# Profile V1 example.
+# Check: cargo run -- profile check examples/profile.toml
+# Plan:  cargo run -- run --profile examples/profile.toml --dry-run
 schema_version = 1
 name = "rust-default"
 
@@ -19,6 +21,7 @@ timezone = "Asia/Shanghai"
 [workspace]
 # "bind" exposes host changes immediately. A future "copy" mode will use
 # explicit import/export and will not overwrite the host project on exit.
+# Relative host paths are resolved from the directory containing this profile.
 mode = "bind"
 host = "."
 guest = "/workspace"
