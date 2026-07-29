@@ -51,7 +51,6 @@ pub fn plan_codex_container(
     Ok(RuntimePlan {
         profile_name: resolved.profile().name.clone(),
         network: network_exposure(resolved.profile().network.mode),
-        proxy: resolved.profile().network.proxy.clone(),
         workspace,
         codex_state,
         command,
@@ -76,11 +75,6 @@ fn build_run_command(
     command.environment("LANG", &profile.guest.locale);
     command.environment("LC_ALL", &profile.guest.locale);
     command.environment("TZ", &profile.guest.timezone);
-    if let Some(proxy) = &profile.network.proxy {
-        for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
-            command.environment(name, proxy.as_str());
-        }
-    }
     if let Some(state) = codex_state {
         command.environment("CODEX_HOME", state.guest());
     }

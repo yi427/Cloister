@@ -15,7 +15,6 @@ timezone = "America/New_York"
 
 [network]
 mode = "default"
-# proxy = "http://host.container.internal:7890"
 
 [codex]
 state = "shared"

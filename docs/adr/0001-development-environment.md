@@ -116,13 +116,6 @@ non-agent-controlled firewall or proxy and tests bypass attempts. Authentication
 endpoints, model APIs, package registries, Git remotes, telemetry, and MCP
 servers must be modeled separately.
 
-Profile V3 may optionally expose one credential-free HTTP or HTTPS proxy URL
-through the conventional uppercase and lowercase `HTTP_PROXY` and `HTTPS_PROXY`
-environment variables. A host proxy can be addressed through
-`host.container.internal`. This is advisory configuration for compatible guest
-programs, not an enforced egress boundary: the default network continues to
-permit direct outbound connections.
-
 ## Threat boundary
 
 Cloister is intended to reduce damage from commands executed by an AI agent and

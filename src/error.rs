@@ -6,11 +6,6 @@ pub(crate) mod message {
     pub const MEMORY_INVALID_FORMAT: &str = "memory must be a positive integer followed by M or G";
     pub const MEMORY_MUST_BE_NON_ZERO: &str = "memory must be greater than zero";
     pub const MEMORY_OVERFLOW: &str = "memory is too large";
-    pub const PROXY_CREDENTIALS_NOT_ALLOWED: &str =
-        "proxy URL must not contain embedded credentials";
-    pub const PROXY_INVALID_URL: &str = "proxy must be a valid URL";
-    pub const PROXY_UNSUPPORTED_SCHEME: &str = "proxy URL scheme must be http or https";
-
     pub const PROFILE_PARSE_FAILED: &str = "failed to parse profile";
     pub const PROFILE_READ_FAILED: &str = "failed to read profile";
     pub const PROFILE_VALIDATION_FAILED: &str = "profile validation failed";

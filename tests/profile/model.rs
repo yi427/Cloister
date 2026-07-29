@@ -23,7 +23,6 @@ fn constructs_profile_v3_through_the_public_api() {
         },
         network: NetworkProfile {
             mode: NetworkMode::Default,
-            proxy: None,
         },
         codex: CodexProfile {
             state: AgentState::Isolated,
@@ -35,6 +34,5 @@ fn constructs_profile_v3_through_the_public_api() {
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
     assert_eq!(profile.network.mode, NetworkMode::Default);
-    assert!(profile.network.proxy.is_none());
     assert_eq!(profile.codex.state, AgentState::Isolated);
 }
