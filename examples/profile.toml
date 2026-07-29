@@ -1,0 +1,37 @@
+# Draft schema. It is documentation until profile parsing is implemented.
+schema_version = 1
+name = "rust-default"
+
+[image]
+# A local image that Cloister will build from a pinned Containerfile.
+reference = "cloister/rust-node:dev"
+architecture = "arm64"
+
+[guest]
+hostname = "cloister"
+cpus = 4
+memory = "8G"
+user = "cloister"
+locale = "zh_CN.UTF-8"
+timezone = "Asia/Shanghai"
+
+[workspace]
+# "bind" exposes host changes immediately. A future "copy" mode will use
+# explicit import/export and will not overwrite the host project on exit.
+mode = "bind"
+host = "."
+guest = "/workspace"
+access = "read-write"
+
+[network]
+# Apple container's default network has internet egress. A future "restricted"
+# mode requires Cloister-managed firewall or proxy enforcement.
+mode = "default"
+
+[agents.codex]
+enabled = true
+state = "isolated"
+
+[agents.claude]
+enabled = true
+state = "isolated"
