@@ -7,23 +7,21 @@ use std::{
     fmt, fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::ExitCode,
+    process::{ExitCode, ExitStatus},
 };
 
 use clap::{Args, ValueHint};
 
 use crate::{
     error::message,
-    preflight::{PreflightError, resolve_profile_workspace},
+    preflight::{PreflightError, resolve_launch},
     profile::{AgentState, LoadProfileError, Profile},
     runtime::{RuntimeExecutionError, RuntimePlanError, execute, plan_codex_container},
 };
 
-use super::run::exit_code;
-
 #[derive(Debug, Args)]
 pub(super) struct CodexArgs {
-    /// Path to a Profile V2 TOML file.
+    /// Path to a Profile V3 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -46,18 +44,14 @@ pub(super) struct CodexArgs {
 
 impl CodexArgs {
     pub(super) async fn execute(self) -> Result<ExitCode, CodexCommandError> {
-        let selected = load_selected_profile(self.profile.as_deref())?;
+        let profile = load_selected_profile(self.profile.as_deref())?;
         let workspace = match self.workspace {
             Some(workspace) => workspace,
             None => env::current_dir().map_err(CodexCommandError::CurrentDirectory)?,
         };
-        let resolved = resolve_profile_workspace(selected.profile, &selected.source, workspace)?;
+        let resolved = resolve_launch(profile, workspace)?;
 
-        if !resolved.profile().agents.codex.enabled {
-            return Err(RuntimePlanError::CodexDisabled.into());
-        }
-
-        let shared_state = match resolved.profile().agents.codex.state {
+        let shared_state = match resolved.profile().codex.state {
             AgentState::Isolated => None,
             AgentState::Shared if self.dry_run => Some(codex_state_directory_path()?),
             AgentState::Shared => Some(prepare_codex_state_directory()?),
@@ -70,25 +64,24 @@ impl CodexArgs {
         }
 
         let status = execute(plan.command()).await?;
-        Ok(exit_code(status))
+        Ok(child_exit_code(status))
     }
 }
 
-struct SelectedProfile {
-    profile: Profile,
-    source: PathBuf,
-}
-
-fn load_selected_profile(path: Option<&Path>) -> Result<SelectedProfile, CodexCommandError> {
+fn load_selected_profile(path: Option<&Path>) -> Result<Profile, CodexCommandError> {
     let path = match path {
         Some(path) => path.to_owned(),
         None => default_profile_path()?,
     };
-    let profile = crate::profile::load_profile(&path).map_err(CodexCommandError::Load)?;
-    Ok(SelectedProfile {
-        profile,
-        source: path,
-    })
+    crate::profile::load_profile(path).map_err(CodexCommandError::Load)
+}
+
+fn child_exit_code(status: ExitStatus) -> ExitCode {
+    status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .map(ExitCode::from)
+        .unwrap_or(ExitCode::FAILURE)
 }
 
 fn default_profile_path() -> Result<PathBuf, CodexCommandError> {

@@ -53,7 +53,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
         canonical_project.display()
     )));
     assert!(stdout.contains(&format!(
-        "codex state: {} -> /cloister/agents/codex (shared across projects)",
+        "Codex state: {} -> /cloister/agents/codex (shared across projects)",
         state.display()
     )));
     assert!(stdout.contains("\"CODEX_HOME=/cloister/agents/codex\""));
@@ -89,7 +89,7 @@ fn loads_the_default_global_profile_when_present() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("Profile: global-profile"));
-    assert!(stdout.contains("Agent state mounts: none (ephemeral)"));
+    assert!(stdout.contains("Codex state: ephemeral"));
     assert!(!home.join(".local/share/cloister/agents/codex").exists());
 }
 

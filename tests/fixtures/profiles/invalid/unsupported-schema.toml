@@ -1,12 +1,11 @@
-schema_version = 2
-name = "restricted-network"
+schema_version = 4
+name = "unsupported-schema"
 
 [image]
 reference = "cloister/rust-node:dev"
 architecture = "arm64"
 
 [guest]
-hostname = "cloister"
 cpus = 4
 memory = "8G"
 user = "cloister"
@@ -14,12 +13,7 @@ locale = "zh_CN.UTF-8"
 timezone = "Asia/Shanghai"
 
 [network]
-mode = "restricted"
+mode = "default"
 
-[agents.codex]
-enabled = true
-state = "isolated"
-
-[agents.claude]
-enabled = true
+[codex]
 state = "isolated"

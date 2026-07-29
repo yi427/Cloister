@@ -4,7 +4,7 @@ use garde::{Error, Report, Validate};
 
 use crate::error::message;
 
-use super::{AgentProfiles, NetworkMode, PROFILE_SCHEMA_VERSION, Profile};
+use super::{PROFILE_SCHEMA_VERSION, Profile};
 
 /// Aggregate of all static validation failures found in one profile.
 pub type ProfileValidationErrors = Report;
@@ -33,20 +33,5 @@ pub(super) fn validate_required_text(value: &str, _: &()) -> garde::Result {
         Err(Error::new(message::VALUE_MUST_NOT_BE_BLANK))
     } else {
         Ok(())
-    }
-}
-
-pub(super) fn validate_network_mode(mode: &NetworkMode, _: &()) -> garde::Result {
-    match mode {
-        NetworkMode::Default => Ok(()),
-        NetworkMode::Restricted => Err(Error::new(message::NETWORK_RESTRICTED_NOT_IMPLEMENTED)),
-    }
-}
-
-pub(super) fn validate_agents_enabled(agents: &AgentProfiles, _: &()) -> garde::Result {
-    if agents.codex.enabled || agents.claude.enabled {
-        Ok(())
-    } else {
-        Err(Error::new(message::AT_LEAST_ONE_AGENT_REQUIRED))
     }
 }

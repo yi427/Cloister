@@ -16,7 +16,7 @@ pub(super) struct ProfileArgs {
 enum ProfileCommand {
     /// Check that a profile can be parsed and passes static validation.
     Check {
-        /// Path to a Profile V2 TOML file.
+        /// Path to a Profile V3 TOML file.
         #[arg(value_name = "PROFILE", value_hint = ValueHint::FilePath)]
         path: PathBuf,
     },

@@ -1,4 +1,4 @@
-//! Resolution of host workspace paths relative to their profile file.
+//! Resolution and validation of the workspace selected for a launch.
 
 use std::{
     error::Error,
@@ -8,21 +8,15 @@ use std::{
 
 use crate::{error::message, profile::Profile};
 
-/// A validated profile whose host paths have been resolved and checked.
+/// A validated profile paired with the workspace selected for this launch.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResolvedProfile {
-    source: PathBuf,
+pub struct ResolvedLaunch {
     profile: Profile,
     workspace: PathBuf,
 }
 
-impl ResolvedProfile {
-    /// Canonical path of the profile document.
-    pub fn source(&self) -> &Path {
-        &self.source
-    }
-
-    /// Profile with a canonical, existing workspace host directory.
+impl ResolvedLaunch {
+    /// Validated environment and Codex policy.
     pub fn profile(&self) -> &Profile {
         &self.profile
     }
@@ -33,17 +27,11 @@ impl ResolvedProfile {
     }
 }
 
-/// Resolves a profile document and the workspace selected for this execution.
-pub fn resolve_profile_workspace(
+/// Resolves the workspace selected for one launch.
+pub fn resolve_launch(
     profile: Profile,
-    profile_path: impl AsRef<Path>,
     workspace: impl AsRef<Path>,
-) -> Result<ResolvedProfile, PreflightError> {
-    let profile_path = profile_path.as_ref();
-    let source = fs::canonicalize(profile_path).map_err(|source| PreflightError::ProfilePath {
-        path: profile_path.to_owned(),
-        source,
-    })?;
+) -> Result<ResolvedLaunch, PreflightError> {
     let configured = workspace.as_ref().to_owned();
     let resolved =
         fs::canonicalize(&configured).map_err(|source| PreflightError::WorkspacePath {
@@ -59,8 +47,7 @@ pub fn resolve_profile_workspace(
         return Err(PreflightError::WorkspaceIsRoot { path: resolved });
     }
 
-    Ok(ResolvedProfile {
-        source,
+    Ok(ResolvedLaunch {
         profile,
         workspace: resolved,
     })
@@ -69,10 +56,6 @@ pub fn resolve_profile_workspace(
 /// Host-dependent failure encountered before a runtime plan can be produced.
 #[derive(Debug)]
 pub enum PreflightError {
-    ProfilePath {
-        path: PathBuf,
-        source: io::Error,
-    },
     WorkspacePath {
         configured: PathBuf,
         resolved: PathBuf,
@@ -89,12 +72,6 @@ pub enum PreflightError {
 impl fmt::Display for PreflightError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ProfilePath { path, source } => write!(
-                formatter,
-                "{} '{}': {source}",
-                message::PROFILE_PATH_RESOLUTION_FAILED,
-                path.display()
-            ),
             Self::WorkspacePath {
                 configured,
                 resolved,
@@ -125,7 +102,7 @@ impl fmt::Display for PreflightError {
 impl Error for PreflightError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::ProfilePath { source, .. } | Self::WorkspacePath { source, .. } => Some(source),
+            Self::WorkspacePath { source, .. } => Some(source),
             Self::WorkspaceNotDirectory { .. } | Self::WorkspaceIsRoot { .. } => None,
         }
     }

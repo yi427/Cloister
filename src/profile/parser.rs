@@ -6,7 +6,7 @@ use crate::error::message;
 
 use super::Profile;
 
-/// Parses a TOML document into the Profile V2 data model.
+/// Parses a TOML document into the Profile V3 data model.
 ///
 /// This function checks TOML syntax and the shape of the strongly typed model.
 /// Environment-dependent and security-policy checks belong to validation.

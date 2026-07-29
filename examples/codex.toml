@@ -1,5 +1,5 @@
-# Profile V2 example for: cloister codex --profile examples/codex.toml
-schema_version = 2
+# Profile V3 example for: cloister codex --profile examples/codex.toml
+schema_version = 3
 name = "codex-default"
 
 [image]
@@ -7,7 +7,6 @@ reference = "cloister/rust-node:dev"
 architecture = "arm64"
 
 [guest]
-hostname = "cloister"
 cpus = 4
 memory = "8G"
 user = "cloister"
@@ -17,10 +16,5 @@ timezone = "Asia/Shanghai"
 [network]
 mode = "default"
 
-[agents.codex]
-enabled = true
+[codex]
 state = "shared"
-
-[agents.claude]
-enabled = true
-state = "isolated"

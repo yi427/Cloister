@@ -8,7 +8,6 @@ pub(crate) mod message {
     pub const MEMORY_OVERFLOW: &str = "memory is too large";
 
     pub const PROFILE_PARSE_FAILED: &str = "failed to parse profile";
-    pub const PROFILE_PATH_RESOLUTION_FAILED: &str = "failed to resolve profile path";
     pub const PROFILE_READ_FAILED: &str = "failed to read profile";
     pub const PROFILE_VALIDATION_FAILED: &str = "profile validation failed";
     pub const WORKSPACE_PATH_RESOLUTION_FAILED: &str = "failed to resolve workspace path";
@@ -17,16 +16,10 @@ pub(crate) mod message {
 
     pub const UNSUPPORTED_SCHEMA_VERSION: &str = "schema_version is not supported";
     pub const VALUE_MUST_NOT_BE_BLANK: &str = "must not be blank";
-    pub const NETWORK_RESTRICTED_NOT_IMPLEMENTED: &str =
-        "restricted network mode is not implemented";
-    pub const AT_LEAST_ONE_AGENT_REQUIRED: &str = "at least one coding agent must be enabled";
-    pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "workspace mount paths must not contain ','";
+    pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "bind mount paths must not contain ','";
     pub const RUNTIME_START_FAILED: &str = "failed to start runtime";
-    pub const CODEX_DISABLED: &str = "Codex is disabled by the selected profile";
     pub const SHARED_CODEX_STATE_MISSING: &str =
         "shared Codex state requires a Cloister-managed host directory";
-    pub const SHARED_STATE_REQUIRES_AGENT_COMMAND: &str =
-        "shared agent state requires an agent-specific command such as 'cloister codex'";
     pub const CURRENT_DIRECTORY_FAILED: &str = "failed to resolve the current directory";
     pub const HOME_DIRECTORY_MISSING: &str =
         "HOME is not set; cannot locate Cloister configuration or state";

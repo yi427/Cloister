@@ -23,6 +23,10 @@ cd <project>
 cloister codex
 ```
 
+Cloister does not expose a general-purpose `run` command. Generic Apple
+container planning and execution remain internal implementation details used by
+agent-specific commands.
+
 It uses the current directory as `/workspace` unless `--workspace` selects
 another directory, reuses the configured OCI image, removes the container after
 exit, and persists shared Codex state in a Cloister-managed directory:
@@ -45,7 +49,8 @@ configuration error.
 
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` replace their respective home-relative
 base directories when set. The Profile controls image, resources, guest
-settings, networking, and whether Codex state is `shared` or `isolated`.
+settings, explicit default networking, and whether Codex state is `shared` or
+`isolated`.
 Workspace selection belongs to each CLI invocation, not the Profile.
 
 `--dry-run` resolves and displays the selected workspace and state mount paths

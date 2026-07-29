@@ -1,7 +1,7 @@
-schema_version = 2
+schema_version = 3
 name = "unknown-field"
 unexpected = true
 image = { reference = "cloister/rust-node:dev", architecture = "arm64" }
-guest = { hostname = "cloister", cpus = 4, memory = "8G", user = "cloister", locale = "zh_CN.UTF-8", timezone = "Asia/Shanghai" }
+guest = { cpus = 4, memory = "8G", user = "cloister", locale = "zh_CN.UTF-8", timezone = "Asia/Shanghai" }
 network = { mode = "default" }
-agents = { codex = { enabled = true, state = "isolated" }, claude = { enabled = true, state = "isolated" } }
+codex = { state = "isolated" }

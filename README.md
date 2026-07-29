@@ -17,8 +17,8 @@ The first useful version will:
 - read a versioned TOML profile;
 - start an ARM64 Linux environment through Apple `container`;
 - apply CPU, memory, locale, timezone, and guest-user settings;
-- support a live bind-mounted workspace and an isolated copy workspace;
-- keep each environment's agent state separate from host credentials;
+- expose the selected project through an explicit live bind mount;
+- keep Cloister-managed agent state separate from host credentials;
 - optionally expose an authenticated host shell escape hatch;
 - make network and writable-mount choices visible before launch;
 - stop and remove environments without deleting the host project.
@@ -35,7 +35,7 @@ transparent bidirectional file synchronization.
 - Agent runtime direction: Node.js LTS plus pinned Codex and Claude Code builds
 
 The current profile shape is illustrated in
-[`examples/profile.toml`](examples/profile.toml). Architectural and security
+[`examples/codex.toml`](examples/codex.toml). Architectural and security
 decisions are recorded in
 [`docs/adr/0001-development-environment.md`](docs/adr/0001-development-environment.md).
 
@@ -96,53 +96,19 @@ cp examples/codex.toml ~/.config/cloister/profile.toml
 cross-project shared state. Shared state can contain authentication tokens,
 configuration, history, and skills, so it must be treated as a secret.
 
-Workspace selection is intentionally not part of the Profile. Both high-level
-and low-level commands mount the current directory at `/workspace` by default.
-Select another project for one invocation with:
+Workspace selection is intentionally not part of the Profile. The Codex command
+mounts the current directory at `/workspace` by default. Select another project
+for one invocation with:
 
 ```sh
 cargo run -- codex --workspace /path/to/project
-cargo run -- run --profile examples/profile.toml \
-  --workspace /path/to/project -- /bin/sh
-```
-
-Verify the local toolchain through Cloister:
-
-```sh
-cargo run -- run --profile examples/profile.toml -- /bin/bash -lc \
-  'node --version && rustc --version && cargo --version && \
-   git --version && codex --version && claude --version'
 ```
 
 Check the example profile through the CLI:
 
 ```sh
-cargo run -- profile check examples/profile.toml
+cargo run -- profile check examples/codex.toml
 ```
-
-Inspect the Apple container command plan without starting a virtual machine:
-
-```sh
-cargo run -- run --profile examples/profile.toml --dry-run -- /bin/sh
-```
-
-Run a command in a temporary environment:
-
-```sh
-cargo run -- run --profile examples/smoke.toml \
-  --workspace examples -- /bin/sh
-```
-
-Verify the project mount non-interactively:
-
-```sh
-cargo run -- run --profile examples/smoke.toml --workspace examples -- \
-  /bin/sh -lc 'pwd && test -f smoke.toml && echo "workspace ready"'
-```
-
-The smoke command explicitly selects the `examples/` directory. Its Profile
-only describes the guest environment and agent policy. It intentionally uses a
-public Debian image and does not contain Codex or Claude Code.
 
 The current Host Bridge prototype exposes one MCP tool, `host.exec`. Start it
 with an unused token path:

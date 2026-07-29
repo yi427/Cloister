@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 2;
+pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -26,10 +26,10 @@ pub struct Profile {
     pub image: ImageProfile,
     #[garde(dive)]
     pub guest: GuestProfile,
-    #[garde(dive)]
+    #[garde(skip)]
     pub network: NetworkProfile,
-    #[garde(custom(super::validation::validate_agents_enabled))]
-    pub agents: AgentProfiles,
+    #[garde(skip)]
+    pub codex: CodexProfile,
 }
 
 /// OCI image selection for the guest environment.
@@ -53,8 +53,6 @@ pub enum Architecture {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(deny_unknown_fields)]
 pub struct GuestProfile {
-    #[garde(custom(super::validation::validate_required_text))]
-    pub hostname: String,
     #[garde(skip)]
     pub cpus: CpuCount,
     #[garde(skip)]
@@ -163,7 +161,7 @@ impl<'de> Deserialize<'de> for MemorySize {
     }
 }
 
-/// Reason a memory size could not be represented by Profile V2.
+/// Reason a memory size could not be represented by Profile V3.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParseMemorySizeError {
     InvalidFormat,
@@ -184,10 +182,9 @@ impl fmt::Display for ParseMemorySizeError {
 impl Error for ParseMemorySizeError {}
 
 /// Network policy requested for the environment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkProfile {
-    #[garde(custom(super::validation::validate_network_mode))]
     pub mode: NetworkMode,
 }
 
@@ -196,22 +193,12 @@ pub struct NetworkProfile {
 #[serde(rename_all = "lowercase")]
 pub enum NetworkMode {
     Default,
-    Restricted,
 }
 
-/// AI coding agents available inside the environment.
+/// Codex-specific runtime policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AgentProfiles {
-    pub codex: AgentProfile,
-    pub claude: AgentProfile,
-}
-
-/// Runtime policy shared by each supported coding agent.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentProfile {
-    pub enabled: bool,
+pub struct CodexProfile {
     pub state: AgentState,
 }
 

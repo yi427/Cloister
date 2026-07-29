@@ -23,8 +23,8 @@ fn distinguishes_read_parse_and_validation_failures() {
         load_profile(fixture("missing.toml")).expect_err("missing profile should fail");
     let parse_error = load_profile(fixture("invalid/invalid-memory.toml"))
         .expect_err("invalid memory should fail");
-    let validation_error = load_profile(fixture("invalid/restricted-network.toml"))
-        .expect_err("restricted network should fail");
+    let validation_error = load_profile(fixture("invalid/unsupported-schema.toml"))
+        .expect_err("unsupported schema should fail");
 
     assert!(matches!(read_error, LoadProfileError::Read { .. }));
     assert!(matches!(parse_error, LoadProfileError::Parse { .. }));

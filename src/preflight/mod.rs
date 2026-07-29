@@ -2,4 +2,4 @@
 
 mod workspace;
 
-pub use workspace::{PreflightError, ResolvedProfile, resolve_profile_workspace};
+pub use workspace::{PreflightError, ResolvedLaunch, resolve_launch};

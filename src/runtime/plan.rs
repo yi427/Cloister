@@ -10,21 +10,15 @@ use std::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimePlan {
     pub(super) profile_name: String,
-    pub(super) guest_hostname: String,
     pub(super) network: NetworkExposure,
     pub(super) workspace: WorkspaceMount,
-    pub(super) agent_state_mounts: Vec<AgentStateMount>,
-    pub(super) enabled_agents: Vec<AgentKind>,
+    pub(super) codex_state: Option<CodexStateMount>,
     pub(super) command: CommandSpec,
 }
 
 impl RuntimePlan {
     pub fn profile_name(&self) -> &str {
         &self.profile_name
-    }
-
-    pub fn guest_hostname(&self) -> &str {
-        &self.guest_hostname
     }
 
     pub const fn network(&self) -> NetworkExposure {
@@ -35,12 +29,8 @@ impl RuntimePlan {
         &self.workspace
     }
 
-    pub fn agent_state_mounts(&self) -> &[AgentStateMount] {
-        &self.agent_state_mounts
-    }
-
-    pub fn enabled_agents(&self) -> &[AgentKind] {
-        &self.enabled_agents
+    pub fn codex_state(&self) -> Option<&CodexStateMount> {
+        self.codex_state.as_ref()
     }
 
     pub fn command(&self) -> &CommandSpec {
@@ -52,44 +42,28 @@ impl fmt::Display for RuntimePlan {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(formatter, "Profile: {}", self.profile_name)?;
         writeln!(formatter, "Runtime: Apple container")?;
-        writeln!(
-            formatter,
-            "Guest hostname: {} (mapped through --name)",
-            self.guest_hostname
-        )?;
         writeln!(formatter, "Root filesystem: read-only")?;
         writeln!(formatter, "Network: {}", self.network)?;
         writeln!(
             formatter,
-            "Workspace: {} -> {} ({})",
+            "Workspace: {} -> {} (read-write)",
             self.workspace.host.display(),
-            self.workspace.guest.display(),
-            self.workspace.access
+            self.workspace.guest.display()
         )?;
         writeln!(formatter, "SSH agent forwarding: disabled")?;
         writeln!(formatter, "Host credential mounts: none")?;
-        if self.agent_state_mounts.is_empty() {
-            writeln!(formatter, "Agent state mounts: none (ephemeral)")?;
+        if let Some(state) = &self.codex_state {
+            writeln!(
+                formatter,
+                "Codex state: {} -> {} (shared across projects)",
+                state.host.display(),
+                state.guest.display()
+            )?;
         } else {
-            for mount in &self.agent_state_mounts {
-                writeln!(
-                    formatter,
-                    "{} state: {} -> {} (shared across projects)",
-                    mount.agent,
-                    mount.host.display(),
-                    mount.guest.display()
-                )?;
-            }
+            writeln!(formatter, "Codex state: ephemeral")?;
         }
 
-        write!(formatter, "Enabled agents: ")?;
-        for (index, agent) in self.enabled_agents.iter().enumerate() {
-            if index > 0 {
-                write!(formatter, ", ")?;
-            }
-            write!(formatter, "{agent}")?;
-        }
-        writeln!(formatter)?;
+        writeln!(formatter, "Agent: Codex")?;
         writeln!(formatter, "Lifecycle: run and remove after exit")?;
         writeln!(formatter, "Command:")?;
         writeln!(formatter, "  program: {:?}", self.command.program)?;
@@ -102,19 +76,14 @@ impl fmt::Display for RuntimePlan {
     }
 }
 
-/// Cloister-managed persistent state exposed to one coding agent.
+/// Cloister-managed persistent state exposed to Codex.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentStateMount {
-    pub(super) agent: AgentKind,
+pub struct CodexStateMount {
     pub(super) host: PathBuf,
     pub(super) guest: PathBuf,
 }
 
-impl AgentStateMount {
-    pub const fn agent(&self) -> AgentKind {
-        self.agent
-    }
-
+impl CodexStateMount {
     pub fn host(&self) -> &Path {
         &self.host
     }
@@ -146,7 +115,6 @@ impl CommandSpec {
 pub struct WorkspaceMount {
     pub(super) host: PathBuf,
     pub(super) guest: PathBuf,
-    pub(super) access: WorkspaceMountAccess,
 }
 
 impl WorkspaceMount {
@@ -156,25 +124,6 @@ impl WorkspaceMount {
 
     pub fn guest(&self) -> &Path {
         &self.guest
-    }
-
-    pub const fn access(&self) -> WorkspaceMountAccess {
-        self.access
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WorkspaceMountAccess {
-    ReadOnly,
-    ReadWrite,
-}
-
-impl fmt::Display for WorkspaceMountAccess {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ReadOnly => formatter.write_str("read-only"),
-            Self::ReadWrite => formatter.write_str("read-write"),
-        }
     }
 }
 
@@ -189,21 +138,6 @@ impl fmt::Display for NetworkExposure {
             Self::DefaultWithInternetEgress => {
                 formatter.write_str("default (outbound internet enabled)")
             }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AgentKind {
-    Codex,
-    Claude,
-}
-
-impl fmt::Display for AgentKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Codex => formatter.write_str("codex"),
-            Self::Claude => formatter.write_str("claude"),
         }
     }
 }

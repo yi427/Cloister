@@ -6,28 +6,27 @@ const DEFAULT_PROFILE: &str = include_str!("../fixtures/profiles/valid/default.t
 const INVALID_MEMORY: &str = include_str!("../fixtures/profiles/invalid/invalid-memory.toml");
 const UNKNOWN_FIELD: &str = include_str!("../fixtures/profiles/invalid/unknown-field.toml");
 const ZERO_CPUS: &str = include_str!("../fixtures/profiles/invalid/zero-cpus.toml");
-const EXAMPLE_PROFILE: &str = include_str!("../../examples/profile.toml");
+const EXAMPLE_PROFILE: &str = include_str!("../../examples/codex.toml");
 
 #[test]
-fn parses_a_complete_profile_v2() {
+fn parses_a_complete_profile_v3() {
     let profile = parse_profile(DEFAULT_PROFILE).expect("default profile should parse");
 
-    assert_eq!(profile.schema_version, 2);
+    assert_eq!(profile.schema_version, 3);
     assert_eq!(profile.name, "rust-default");
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
     assert_eq!(profile.network.mode, NetworkMode::Default);
-    assert!(profile.agents.codex.enabled);
-    assert!(profile.agents.claude.enabled);
+    assert_eq!(profile.codex.state, cloister::profile::AgentState::Isolated);
 }
 
 #[test]
-fn user_facing_example_matches_the_valid_fixture() {
+fn parses_the_user_facing_codex_example() {
     let example = parse_profile(EXAMPLE_PROFILE).expect("example profile should parse");
-    let fixture = parse_profile(DEFAULT_PROFILE).expect("default fixture should parse");
 
-    assert_eq!(example, fixture);
+    assert_eq!(example.name, "codex-default");
+    assert_eq!(example.codex.state, cloister::profile::AgentState::Shared);
 }
 
 #[test]
