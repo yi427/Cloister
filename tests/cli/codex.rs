@@ -68,6 +68,38 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
 }
 
 #[test]
+fn dry_run_reports_the_configured_container_host_proxy() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let config = home.join(".config/cloister/profile.toml");
+    fs::create_dir_all(&project).expect("project should be created");
+    fs::create_dir_all(config.parent().expect("config should have a parent"))
+        .expect("config directory should be created");
+    let profile =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml"))
+            .expect("example profile should be readable")
+            .replace(
+                "# proxy = \"http://host.container.internal:7890\"",
+                "proxy = \"http://host.container.internal:7890\"",
+            );
+    fs::write(config, profile).expect("proxy profile should be written");
+
+    let output = run(&home, &project, None, &["codex", "--dry-run"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(stdout.contains(
+        "Proxy: http://host.container.internal:7890/ \
+         (advisory; direct outbound access remains possible)"
+    ));
+    for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+        assert!(stdout.contains(&format!("\"{name}=http://host.container.internal:7890/\"")));
+    }
+}
+
+#[test]
 fn loads_the_default_global_profile_when_present() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");

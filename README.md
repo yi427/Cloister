@@ -96,6 +96,20 @@ cp examples/codex.toml ~/.config/cloister/profile.toml
 cross-project shared state. Shared state can contain authentication tokens,
 configuration, history, and skills, so it must be treated as a secret.
 
+The optional network proxy is exposed to Codex and development tools through
+the standard uppercase and lowercase HTTP/HTTPS proxy environment variables:
+
+```toml
+[network]
+mode = "default"
+proxy = "http://host.container.internal:7890"
+```
+
+Use `host.container.internal` to reach a proxy listening on the Mac host.
+Proxy URLs may use `http` or `https` and must not contain embedded credentials.
+This setting helps compatible tools select a proxy; it does not prevent a
+process from connecting directly, and dry-run reports that limitation.
+
 Workspace selection is intentionally not part of the Profile. The Codex command
 mounts the current directory at `/workspace` by default. Select another project
 for one invocation with:

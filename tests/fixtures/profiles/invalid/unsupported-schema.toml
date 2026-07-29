@@ -9,8 +9,8 @@ architecture = "arm64"
 cpus = 4
 memory = "8G"
 user = "cloister"
-locale = "zh_CN.UTF-8"
-timezone = "Asia/Shanghai"
+locale = "en_US.UTF-8"
+timezone = "America/New_York"
 
 [network]
 mode = "default"

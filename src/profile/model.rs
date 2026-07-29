@@ -8,6 +8,7 @@ use std::{
 };
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use url::Url;
 
 use crate::error::message;
 
@@ -186,6 +187,8 @@ impl Error for ParseMemorySizeError {}
 #[serde(deny_unknown_fields)]
 pub struct NetworkProfile {
     pub mode: NetworkMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyUrl>,
 }
 
 /// Network modes represented by the current Profile schema.
@@ -194,6 +197,84 @@ pub struct NetworkProfile {
 pub enum NetworkMode {
     Default,
 }
+
+/// HTTP proxy exposed to compatible tools inside the guest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProxyUrl(Url);
+
+impl ProxyUrl {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl FromStr for ProxyUrl {
+    type Err = ParseProxyUrlError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let url = Url::parse(value).map_err(|_| ParseProxyUrlError::InvalidUrl)?;
+
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(ParseProxyUrlError::UnsupportedScheme);
+        }
+        if url.host().is_none() {
+            return Err(ParseProxyUrlError::InvalidUrl);
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(ParseProxyUrlError::CredentialsNotAllowed);
+        }
+
+        Ok(Self(url))
+    }
+}
+
+impl fmt::Display for ProxyUrl {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl Serialize for ProxyUrl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProxyUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
+    }
+}
+
+/// Reason a proxy URL could not be represented by Profile V3.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ParseProxyUrlError {
+    InvalidUrl,
+    UnsupportedScheme,
+    CredentialsNotAllowed,
+}
+
+impl fmt::Display for ParseProxyUrlError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidUrl => formatter.write_str(message::PROXY_INVALID_URL),
+            Self::UnsupportedScheme => formatter.write_str(message::PROXY_UNSUPPORTED_SCHEME),
+            Self::CredentialsNotAllowed => {
+                formatter.write_str(message::PROXY_CREDENTIALS_NOT_ALLOWED)
+            }
+        }
+    }
+}
+
+impl Error for ParseProxyUrlError {}
 
 /// Codex-specific runtime policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

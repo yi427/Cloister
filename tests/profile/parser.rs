@@ -18,7 +18,53 @@ fn parses_a_complete_profile_v3() {
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
     assert_eq!(profile.network.mode, NetworkMode::Default);
+    assert!(profile.network.proxy.is_none());
     assert_eq!(profile.codex.state, cloister::profile::AgentState::Isolated);
+}
+
+#[test]
+fn parses_an_optional_http_proxy() {
+    let source = DEFAULT_PROFILE.replace(
+        "mode = \"default\"",
+        "mode = \"default\"\nproxy = \"http://proxy.example:8080\"",
+    );
+
+    let profile = parse_profile(&source).expect("HTTP proxy should parse");
+
+    assert_eq!(
+        profile.network.proxy.as_ref().map(|proxy| proxy.as_str()),
+        Some("http://proxy.example:8080/")
+    );
+}
+
+#[test]
+fn rejects_proxy_credentials_before_they_enter_the_model() {
+    let source = DEFAULT_PROFILE.replace(
+        "mode = \"default\"",
+        "mode = \"default\"\nproxy = \"http://user:secret@proxy.example:8080\"",
+    );
+
+    let error = parse_profile(&source).expect_err("proxy credentials should fail");
+
+    assert!(
+        error
+            .message()
+            .contains("must not contain embedded credentials")
+    );
+    assert!(error.span().is_some());
+}
+
+#[test]
+fn rejects_an_unsupported_proxy_scheme() {
+    let source = DEFAULT_PROFILE.replace(
+        "mode = \"default\"",
+        "mode = \"default\"\nproxy = \"socks5://proxy.example:1080\"",
+    );
+
+    let error = parse_profile(&source).expect_err("SOCKS proxy should fail");
+
+    assert!(error.message().contains("scheme must be http or https"));
+    assert!(error.span().is_some());
 }
 
 #[test]

@@ -6,11 +6,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::profile::ProxyUrl;
+
 /// Complete execution plan for one development environment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimePlan {
     pub(super) profile_name: String,
     pub(super) network: NetworkExposure,
+    pub(super) proxy: Option<ProxyUrl>,
     pub(super) workspace: WorkspaceMount,
     pub(super) codex_state: Option<CodexStateMount>,
     pub(super) command: CommandSpec,
@@ -23,6 +26,10 @@ impl RuntimePlan {
 
     pub const fn network(&self) -> NetworkExposure {
         self.network
+    }
+
+    pub fn proxy(&self) -> Option<&ProxyUrl> {
+        self.proxy.as_ref()
     }
 
     pub fn workspace(&self) -> &WorkspaceMount {
@@ -44,6 +51,13 @@ impl fmt::Display for RuntimePlan {
         writeln!(formatter, "Runtime: Apple container")?;
         writeln!(formatter, "Root filesystem: read-only")?;
         writeln!(formatter, "Network: {}", self.network)?;
+        match &self.proxy {
+            Some(proxy) => writeln!(
+                formatter,
+                "Proxy: {proxy} (advisory; direct outbound access remains possible)"
+            )?,
+            None => writeln!(formatter, "Proxy: none")?,
+        }
         writeln!(
             formatter,
             "Workspace: {} -> {} (read-write)",

@@ -18,7 +18,7 @@ RUN apt-get update \
         pkg-config \
         ripgrep \
         tzdata \
-    && sed -i 's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen \
+    && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
@@ -61,9 +61,9 @@ ENV HOME=/tmp/cloister/home
 ENV CARGO_HOME=/tmp/cloister/cargo
 ENV CODEX_HOME=/tmp/cloister/codex
 ENV DISABLE_AUTOUPDATER=1
-ENV LANG=zh_CN.UTF-8
-ENV LC_ALL=zh_CN.UTF-8
-ENV TZ=Asia/Shanghai
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV TZ=America/New_York
 
 USER cloister
 WORKDIR /workspace

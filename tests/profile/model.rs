@@ -18,11 +18,12 @@ fn constructs_profile_v3_through_the_public_api() {
             cpus: CpuCount::new(4).expect("CPU count should be non-zero"),
             memory: "8G".parse::<MemorySize>().expect("memory should parse"),
             user: "cloister".to_owned(),
-            locale: "zh_CN.UTF-8".to_owned(),
-            timezone: "Asia/Shanghai".to_owned(),
+            locale: "en_US.UTF-8".to_owned(),
+            timezone: "America/New_York".to_owned(),
         },
         network: NetworkProfile {
             mode: NetworkMode::Default,
+            proxy: None,
         },
         codex: CodexProfile {
             state: AgentState::Isolated,
@@ -34,5 +35,6 @@ fn constructs_profile_v3_through_the_public_api() {
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
     assert_eq!(profile.network.mode, NetworkMode::Default);
+    assert!(profile.network.proxy.is_none());
     assert_eq!(profile.codex.state, AgentState::Isolated);
 }

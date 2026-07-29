@@ -43,6 +43,7 @@ fn translates_every_supported_codex_setting() {
 
     assert_eq!(plan.profile_name(), "rust-default");
     assert_eq!(plan.network(), NetworkExposure::DefaultWithInternetEgress);
+    assert!(plan.proxy().is_none());
     assert!(plan.codex_state().is_none());
     assert_eq!(plan.command().program(), OsStr::new("container"));
     assert_eq!(
@@ -78,8 +79,50 @@ fn translates_every_supported_codex_setting() {
         .collect::<Vec<_>>();
     assert_eq!(
         environments,
-        ["LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8", "TZ=Asia/Shanghai"]
+        [
+            "LANG=en_US.UTF-8",
+            "LC_ALL=en_US.UTF-8",
+            "TZ=America/New_York"
+        ]
     );
+}
+
+#[test]
+fn exposes_an_optional_proxy_to_compatible_guest_tools() {
+    let path = fixture("valid/default.toml");
+    let mut profile = load_profile(&path).expect("default profile should load");
+    profile.network.proxy = Some(
+        "http://proxy.example:8080"
+            .parse()
+            .expect("proxy URL should parse"),
+    );
+    let resolved =
+        resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
+
+    let plan =
+        plan_codex_container(&resolved, None, &[]).expect("proxy profile should produce a plan");
+    let environments = plan
+        .command()
+        .arguments()
+        .windows(2)
+        .filter(|pair| pair[0] == "--env")
+        .map(|pair| pair[1].to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        plan.proxy().map(|proxy| proxy.as_str()),
+        Some("http://proxy.example:8080/")
+    );
+    for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+        assert!(
+            environments
+                .iter()
+                .any(|environment| environment == &format!("{name}=http://proxy.example:8080/"))
+        );
+    }
+    assert!(plan.to_string().contains(
+        "Proxy: http://proxy.example:8080/ (advisory; direct outbound access remains possible)"
+    ));
 }
 
 #[test]
