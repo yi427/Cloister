@@ -1,0 +1,7 @@
+schema_version = 1
+name = "invalid-memory"
+image = { reference = "cloister/rust-node:dev", architecture = "arm64" }
+guest = { hostname = "cloister", cpus = 4, memory = "hello", user = "cloister", locale = "zh_CN.UTF-8", timezone = "Asia/Shanghai" }
+workspace = { mode = "bind", host = ".", guest = "/workspace", access = "read-write" }
+network = { mode = "default" }
+agents = { codex = { enabled = true, state = "isolated" }, claude = { enabled = true, state = "isolated" } }

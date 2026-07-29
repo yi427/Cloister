@@ -1,0 +1,13 @@
+//! Profile definitions, parsing, and validation.
+
+mod model;
+mod parser;
+mod validation;
+
+pub use model::{
+    AgentProfile, AgentProfiles, AgentState, Architecture, CpuCount, GuestProfile, ImageProfile,
+    MemorySize, NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION, ParseMemorySizeError, Profile,
+    WorkspaceAccess, WorkspaceMode, WorkspaceProfile,
+};
+pub use parser::{ParseProfileError, parse_profile};
+pub use validation::{ProfileValidationErrors, validate_profile};

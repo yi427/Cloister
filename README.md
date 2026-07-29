@@ -39,7 +39,15 @@ decisions are recorded in
 ## Project layout
 
 ```text
-src/             Rust application code and module unit tests
+src/
+├── lib.rs                  Library entry point
+├── main.rs                 Terminal application entry point
+├── error.rs                Centralized error messages
+└── profile/
+    ├── mod.rs              Profile module boundary
+    ├── model.rs            Versioned profile data model
+    ├── parser.rs           Side-effect-free parsing
+    └── validation.rs       Fail-closed semantic validation
 tests/           Cross-module and CLI integration tests
 tests/fixtures/  Deterministic test inputs and expected outputs
 examples/        User-facing configuration examples
