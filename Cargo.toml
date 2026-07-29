@@ -7,7 +7,30 @@ description = "A privacy-oriented development environment for AI coding agents"
 publish = false
 
 [dependencies]
+axum = "0.8"
+base64 = "0.23"
 clap = { version = "4.6", features = ["derive"] }
 garde = { version = "0.23", features = ["derive"] }
+getrandom = "0.4"
+rmcp = { version = "3.0", features = [
+    "client",
+    "transport-streamable-http-client-reqwest",
+    "transport-streamable-http-server",
+] }
+schemars = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+subtle = "2.6"
+tokio = { version = "1.0", features = [
+    "macros",
+    "net",
+    "process",
+    "rt-multi-thread",
+    "signal",
+    "time",
+] }
+tokio-util = "0.7"
 toml = "1.1"
+
+[dev-dependencies]
+tempfile = "3.0"

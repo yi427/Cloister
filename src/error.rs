@@ -27,4 +27,21 @@ pub(crate) mod message {
     pub const CONTAINER_EXECUTION_NOT_IMPLEMENTED: &str =
         "container execution is not implemented; pass --dry-run to inspect the plan";
     pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "workspace mount paths must not contain ','";
+
+    pub const BRIDGE_TOKEN_READ_FAILED: &str = "failed to read host bridge token";
+    pub const BRIDGE_TOKEN_CREATE_FAILED: &str = "failed to create host bridge token";
+    pub const BRIDGE_TOKEN_WRITE_FAILED: &str = "failed to write host bridge token";
+    pub const BRIDGE_TOKEN_INVALID: &str = "host bridge token is invalid";
+    pub const BRIDGE_TOKEN_INSECURE: &str =
+        "host bridge token must be a regular file accessible only by its owner";
+    pub const BRIDGE_NON_LOOPBACK_LISTEN: &str =
+        "host bridge may only listen on a loopback address";
+    pub const BRIDGE_LISTEN_FAILED: &str = "failed to bind host bridge";
+    pub const BRIDGE_SERVE_FAILED: &str = "host bridge server failed";
+    pub const BRIDGE_SIGNAL_FAILED: &str = "failed to wait for shutdown signal";
+    pub const BRIDGE_CLIENT_FAILED: &str = "host bridge request failed";
+    pub const BRIDGE_RESPONSE_INVALID: &str = "host bridge returned an invalid response";
+    pub const BRIDGE_REQUEST_TIMED_OUT: &str = "host bridge request timed out";
+    pub const HOST_EXEC_SPAWN_FAILED: &str = "failed to start the host shell";
+    pub const HOST_EXEC_FAILED: &str = "host command failed";
 }

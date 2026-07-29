@@ -6,7 +6,8 @@ and development toolchains inside lightweight Linux virtual machines on Apple
 silicon.
 
 The project is currently at the environment-definition stage. The Rust binary
-can load and validate profiles, but it does not create or manage containers yet.
+can load profiles, produce inspectable runtime plans, and serve an authenticated
+host-command bridge. It does not create or manage containers yet.
 
 ## MVP boundary
 
@@ -17,6 +18,7 @@ The first useful version will:
 - apply CPU, memory, locale, timezone, user, and workspace settings;
 - support a live bind-mounted workspace and an isolated copy workspace;
 - keep each environment's agent state separate from host credentials;
+- optionally expose an authenticated host shell escape hatch;
 - make network and writable-mount choices visible before launch;
 - stop and remove environments without deleting the host project.
 
@@ -51,6 +53,30 @@ cargo run -- run --profile examples/profile.toml --dry-run
 Relative `workspace.host` values are resolved from the directory containing the
 profile file, not from the shell's current working directory.
 
+The current Host Bridge prototype exposes one MCP tool, `host.exec`. Start it
+with an unused token path:
+
+```sh
+cargo run -- host serve \
+  --listen 127.0.0.1:17834 \
+  --token-file /private/tmp/cloister-bridge.token
+```
+
+Exercise it from another process:
+
+```sh
+cargo run -- host exec \
+  --endpoint http://127.0.0.1:17834/mcp \
+  --token-file /private/tmp/cloister-bridge.token \
+  'xcodebuild -version'
+```
+
+The token is generated with owner-only permissions and is never printed.
+The bridge refuses non-loopback listeners. `host.exec` deliberately allows
+arbitrary commands with the permissions of the macOS user running Cloister;
+using it gives the AI an escape hatch from the container boundary.
+Container-to-host transport wiring remains a later slice.
+
 ## Project layout
 
 ```text
@@ -59,6 +85,7 @@ src/
 ├── main.rs                 Terminal application entry point
 ├── error.rs                Centralized error messages
 ├── cli/                    clap command definitions and dispatch
+├── host_bridge/            Authenticated host shell MCP bridge
 ├── preflight/              Host path resolution and checks
 ├── runtime/                Inspectable plans and container arguments
 └── profile/
