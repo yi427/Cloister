@@ -26,6 +26,8 @@ use crate::error::message;
 
 use super::{BridgeToken, tools};
 
+const ALLOWED_MCP_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "host.container.internal"];
+
 #[derive(Clone, Debug)]
 struct HostBridgeService {
     tool_router: ToolRouter<Self>,
@@ -96,6 +98,7 @@ pub async fn serve(
             || Ok(HostBridgeService::new()),
             Default::default(),
             StreamableHttpServerConfig::default()
+                .with_allowed_hosts(ALLOWED_MCP_HOSTS)
                 .with_json_response(true)
                 .with_sse_keep_alive(None)
                 .with_cancellation_token(cancellation.child_token()),
