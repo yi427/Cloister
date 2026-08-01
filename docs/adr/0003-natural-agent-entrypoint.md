@@ -53,6 +53,11 @@ settings, explicit default networking, and whether Codex state is `shared` or
 `isolated`.
 Workspace selection belongs to each CLI invocation, not the Profile.
 
+The natural entry point also enables the authenticated `cloister_host` MCP
+bridge by default. Its configuration is injected for one Codex process and does
+not mutate persistent `config.toml`. `--no-host-bridge` provides an explicit
+minimum-capability invocation.
+
 `--dry-run` resolves and displays the selected workspace and state mount paths
 without creating or changing the agent state directory.
 
@@ -65,3 +70,7 @@ pre-existing `~/.codex`.
 
 The workspace remains a live read-write bind mount by default. The agent can
 modify or delete files in it.
+
+The default host bridge is a stronger boundary crossing: `host.exec` can run
+arbitrary commands with the macOS user's permissions. The runtime plan and
+startup output must state this capability directly.

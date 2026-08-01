@@ -10,8 +10,13 @@ use super::CommandSpec;
 
 /// Executes a runtime command without shell parsing.
 pub async fn execute(command: &CommandSpec) -> Result<ExitStatus, RuntimeExecutionError> {
-    Command::new(command.program())
-        .args(command.arguments())
+    let mut process = Command::new(command.program());
+    process.args(command.arguments());
+    for variable in command.secret_environment() {
+        process.env(&variable.name, variable.value());
+    }
+
+    process
         .status()
         .await
         .map_err(|source| RuntimeExecutionError::Start {
@@ -62,6 +67,7 @@ mod tests {
         let command = CommandSpec {
             program: OsString::from("/cloister/does-not-exist/container"),
             arguments: Vec::new(),
+            secret_environment: Vec::new(),
         };
 
         let error = execute(&command)
@@ -70,5 +76,27 @@ mod tests {
 
         assert!(matches!(error, RuntimeExecutionError::Start { .. }));
         assert!(error.to_string().contains("failed to start runtime"));
+    }
+
+    #[tokio::test]
+    async fn forwards_a_secret_environment_without_shell_interpolation() {
+        use crate::runtime::plan::SecretEnvironmentVariable;
+
+        let command = CommandSpec {
+            program: OsString::from("/bin/sh"),
+            arguments: vec![
+                OsString::from("-c"),
+                OsString::from("test -n \"$CLOISTER_RUNTIME_TEST_TOKEN\""),
+            ],
+            secret_environment: vec![SecretEnvironmentVariable::new(
+                "CLOISTER_RUNTIME_TEST_TOKEN",
+                "sensitive-runtime-value",
+            )],
+        };
+
+        let status = execute(&command).await.expect("test shell should start");
+
+        assert!(status.success());
+        assert!(!format!("{command:?}").contains("sensitive-runtime-value"));
     }
 }

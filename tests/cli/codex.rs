@@ -1,5 +1,6 @@
 use std::{
     fs,
+    net::TcpListener,
     os::unix::fs::{PermissionsExt, symlink},
     path::Path,
     process::{Command, Output},
@@ -57,14 +58,37 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
         state.display()
     )));
     assert!(stdout.contains("\"CODEX_HOME=/cloister/agents/codex\""));
+    assert!(stdout.contains("Host bridge: http://host.container.internal:17834/mcp"));
+    assert!(stdout.contains("Host capability: host.exec"));
+    assert!(stdout.contains("Host bridge token: ephemeral, forwarded, and redacted"));
+    assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
+    assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
+    assert!(stdout.contains("default_tools_approval_mode=\\\"prompt\\\""));
     assert!(stdout.contains("\"cloister/rust-node:dev\""));
-    assert!(
-        stdout
-            .lines()
-            .last()
-            .is_some_and(|line| line.ends_with("\"codex\""))
-    );
     assert!(!state.exists(), "dry-run must not create agent state");
+}
+
+#[test]
+fn can_disable_the_default_host_bridge() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_default_profile(&home);
+
+    let output = run(
+        &home,
+        &project,
+        None,
+        &["codex", "--no-host-bridge", "--dry-run"],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(stdout.contains("Host bridge: disabled"));
+    assert!(!stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
+    assert!(!stdout.contains("mcp_servers.cloister_host"));
 }
 
 #[test]
@@ -116,6 +140,7 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
             "codex",
             "--profile",
             profile.to_str().expect("profile path should be UTF-8"),
+            "--no-host-bridge",
             "--",
             "--version",
         ],
@@ -133,6 +158,56 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
             & 0o777,
         0o700
     );
+}
+
+#[test]
+fn starts_the_default_bridge_and_forwards_only_the_token_name() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let runtime = bin.join("container");
+    let port = TcpListener::bind("127.0.0.1:0")
+        .expect("temporary listener should bind")
+        .local_addr()
+        .expect("temporary address should exist")
+        .port();
+    fs::create_dir_all(&project).expect("project should be created");
+    fs::create_dir_all(&bin).expect("bin directory should be created");
+    fs::write(
+        &runtime,
+        "#!/bin/sh\ntest -n \"$CLOISTER_HOST_BRIDGE_TOKEN\" || exit 8\nprintf '%s\\n' \"$@\"\n",
+    )
+    .expect("fake container runtime should be written");
+    fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755))
+        .expect("fake runtime should be executable");
+    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml");
+
+    let output = run(
+        &home,
+        &project,
+        Some(&bin),
+        &[
+            "codex",
+            "--profile",
+            profile.to_str().expect("profile path should be UTF-8"),
+            "--host-bridge-port",
+            &port.to_string(),
+            "--",
+            "--version",
+        ],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(stdout.contains(&format!(
+        "Host bridge: http://host.container.internal:{port}/mcp"
+    )));
+    assert!(stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
+    assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
+    assert!(stdout.contains("default_tools_approval_mode=\"prompt\""));
+    TcpListener::bind(("127.0.0.1", port)).expect("bridge port should be released after Codex");
 }
 
 #[test]

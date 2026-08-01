@@ -7,7 +7,7 @@ use std::{
 use cloister::{
     preflight::resolve_launch,
     profile::{AgentState, load_profile},
-    runtime::{NetworkExposure, plan_codex_container},
+    runtime::{HostBridgeLaunch, NetworkExposure, plan_codex_container},
 };
 use tempfile::tempdir;
 
@@ -23,7 +23,7 @@ fn default_plan() -> cloister::runtime::RuntimePlan {
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
 
-    plan_codex_container(&resolved, None, &[]).expect("default profile should produce a plan")
+    plan_codex_container(&resolved, None, None, &[]).expect("default profile should produce a plan")
 }
 
 fn argument_after<'a>(arguments: &'a [OsString], option: &str) -> &'a OsStr {
@@ -112,7 +112,7 @@ fn rejects_a_mount_path_that_container_cannot_represent() {
     let resolved = resolve_launch(profile, workspace).expect("host workspace should resolve");
 
     let error =
-        plan_codex_container(&resolved, None, &[]).expect_err("comma mount path should fail");
+        plan_codex_container(&resolved, None, None, &[]).expect_err("comma mount path should fail");
 
     assert!(error.to_string().contains("must not contain ','"));
 }
@@ -128,7 +128,7 @@ fn appends_codex_arguments_without_shell_parsing() {
         OsString::from("model_reasoning_effort=high"),
     ];
 
-    let plan = plan_codex_container(&resolved, None, &arguments)
+    let plan = plan_codex_container(&resolved, None, None, &arguments)
         .expect("Codex launch should produce plan");
 
     assert!(plan.command().arguments().ends_with(&[
@@ -148,7 +148,7 @@ fn mounts_shared_codex_state_and_sets_codex_home() {
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let state = fixture("valid");
 
-    let plan = plan_codex_container(&resolved, Some(&state), &[])
+    let plan = plan_codex_container(&resolved, Some(&state), None, &[])
         .expect("shared Codex state should produce a plan");
     let arguments = plan.command().arguments();
     let mount = plan.codex_state().expect("Codex state should be mounted");
@@ -179,8 +179,60 @@ fn shared_codex_state_requires_a_host_directory() {
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
 
-    let error = plan_codex_container(&resolved, None, &[])
+    let error = plan_codex_container(&resolved, None, None, &[])
         .expect_err("shared state without a directory should fail");
 
     assert!(error.to_string().contains("shared Codex state requires"));
+}
+
+#[test]
+fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
+    let path = fixture("valid/default.toml");
+    let profile = load_profile(&path).expect("default profile should load");
+    let resolved =
+        resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
+    let endpoint = "http://host.container.internal:17834/mcp";
+    let token = "sensitive-bridge-token";
+
+    let plan = plan_codex_container(
+        &resolved,
+        None,
+        Some(HostBridgeLaunch::new(endpoint, token)),
+        &[],
+    )
+    .expect("host bridge plan should be created");
+    let arguments = plan.command().arguments();
+
+    assert_eq!(plan.host_bridge_endpoint(), Some(endpoint));
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| { pair[0] == "--env" && pair[1] == "CLOISTER_HOST_BRIDGE_TOKEN" })
+    );
+    for expected in [
+        format!("mcp_servers.cloister_host.url=\"{endpoint}\""),
+        "mcp_servers.cloister_host.bearer_token_env_var=\"CLOISTER_HOST_BRIDGE_TOKEN\"".to_owned(),
+        "mcp_servers.cloister_host.required=true".to_owned(),
+        "mcp_servers.cloister_host.enabled_tools=[\"host.exec\"]".to_owned(),
+        "mcp_servers.cloister_host.default_tools_approval_mode=\"prompt\"".to_owned(),
+    ] {
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument == OsStr::new(&expected))
+        );
+    }
+    assert_eq!(
+        plan.command()
+            .secret_environment_names()
+            .collect::<Vec<_>>(),
+        [OsStr::new("CLOISTER_HOST_BRIDGE_TOKEN")]
+    );
+
+    let display = plan.to_string();
+    let debug = format!("{plan:?}");
+    assert!(display.contains("Host capability: host.exec"));
+    assert!(display.contains("[REDACTED]"));
+    assert!(!display.contains(token));
+    assert!(!debug.contains(token));
 }

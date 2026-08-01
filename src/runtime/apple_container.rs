@@ -13,15 +13,53 @@ use crate::{
     profile::{AgentState, Architecture, NetworkMode, Profile},
 };
 
-use super::plan::{CodexStateMount, CommandSpec, NetworkExposure, RuntimePlan, WorkspaceMount};
+use super::plan::{
+    CodexStateMount, CommandSpec, NetworkExposure, RuntimePlan, SecretEnvironmentVariable,
+    WorkspaceMount,
+};
 
 const CODEX_STATE_GUEST_PATH: &str = "/cloister/agents/codex";
+const HOST_BRIDGE_TOKEN_ENVIRONMENT: &str = "CLOISTER_HOST_BRIDGE_TOKEN";
 const WORKSPACE_GUEST_PATH: &str = "/workspace";
+
+/// Transient MCP endpoint and bearer token injected for one Codex invocation.
+#[derive(Clone, Copy)]
+pub struct HostBridgeLaunch<'a> {
+    endpoint: &'a str,
+    bearer_token: Option<&'a str>,
+}
+
+impl<'a> HostBridgeLaunch<'a> {
+    pub const fn new(endpoint: &'a str, bearer_token: &'a str) -> Self {
+        Self {
+            endpoint,
+            bearer_token: Some(bearer_token),
+        }
+    }
+
+    pub const fn dry_run(endpoint: &'a str) -> Self {
+        Self {
+            endpoint,
+            bearer_token: None,
+        }
+    }
+}
+
+impl fmt::Debug for HostBridgeLaunch<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostBridgeLaunch")
+            .field("endpoint", &self.endpoint)
+            .field("bearer_token", &"[REDACTED]")
+            .finish()
+    }
+}
 
 /// Produces an inspectable Codex launch plan without starting a process.
 pub fn plan_codex_container(
     resolved: &ResolvedLaunch,
     shared_state: Option<&Path>,
+    host_bridge: Option<HostBridgeLaunch<'_>>,
     codex_arguments: &[OsString],
 ) -> Result<RuntimePlan, RuntimePlanError> {
     reject_mount_separator(resolved.workspace())?;
@@ -45,6 +83,7 @@ pub fn plan_codex_container(
         resolved.profile(),
         &workspace,
         codex_state.as_ref(),
+        host_bridge,
         codex_arguments,
     );
 
@@ -53,6 +92,7 @@ pub fn plan_codex_container(
         network: network_exposure(resolved.profile().network.mode),
         workspace,
         codex_state,
+        host_bridge_endpoint: host_bridge.map(|bridge| bridge.endpoint.to_owned()),
         command,
     })
 }
@@ -61,6 +101,7 @@ fn build_run_command(
     profile: &Profile,
     workspace: &WorkspaceMount,
     codex_state: Option<&CodexStateMount>,
+    host_bridge: Option<HostBridgeLaunch<'_>>,
     codex_arguments: &[OsString],
 ) -> CommandSpec {
     let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
@@ -78,6 +119,9 @@ fn build_run_command(
     if let Some(state) = codex_state {
         command.environment("CODEX_HOME", state.guest());
     }
+    if let Some(bridge) = host_bridge {
+        command.forward_secret_environment(HOST_BRIDGE_TOKEN_ENVIRONMENT, bridge.bearer_token);
+    }
 
     command.flag("--interactive");
     command.flag("--tty");
@@ -93,7 +137,7 @@ fn build_run_command(
     }
     command.option("--label", format!("org.cloister.profile={}", profile.name));
 
-    command.container_command("codex", codex_arguments);
+    command.codex_command(host_bridge, codex_arguments);
     command.finish()
 }
 
@@ -125,6 +169,7 @@ fn bind_mount_argument(host: &Path, guest: &Path) -> OsString {
 
 struct ContainerRunCommandBuilder {
     options: Vec<OsString>,
+    secret_environment: Vec<SecretEnvironmentVariable>,
     image: OsString,
     container_command: Vec<OsString>,
 }
@@ -133,6 +178,7 @@ impl ContainerRunCommandBuilder {
     fn new(image: impl AsRef<OsStr>) -> Self {
         Self {
             options: vec![OsString::from("run")],
+            secret_environment: Vec::new(),
             image: image.as_ref().to_owned(),
             container_command: Vec::new(),
         }
@@ -154,9 +200,34 @@ impl ContainerRunCommandBuilder {
         self.option("--env", assignment);
     }
 
-    fn container_command(&mut self, program: &'static str, arguments: &[OsString]) {
-        self.container_command.push(OsString::from(program));
+    fn forward_secret_environment(&mut self, name: &'static str, value: Option<&str>) {
+        self.option("--env", name);
+        if let Some(value) = value {
+            self.secret_environment
+                .push(SecretEnvironmentVariable::new(name, value));
+        }
+    }
+
+    fn codex_command(&mut self, host_bridge: Option<HostBridgeLaunch<'_>>, arguments: &[OsString]) {
+        self.container_command.push(OsString::from("codex"));
+        if let Some(bridge) = host_bridge {
+            self.codex_config(format!(
+                "mcp_servers.cloister_host.url=\"{}\"",
+                bridge.endpoint
+            ));
+            self.codex_config(format!(
+                "mcp_servers.cloister_host.bearer_token_env_var=\"{HOST_BRIDGE_TOKEN_ENVIRONMENT}\""
+            ));
+            self.codex_config("mcp_servers.cloister_host.required=true");
+            self.codex_config("mcp_servers.cloister_host.enabled_tools=[\"host.exec\"]");
+            self.codex_config("mcp_servers.cloister_host.default_tools_approval_mode=\"prompt\"");
+        }
         self.container_command.extend_from_slice(arguments);
+    }
+
+    fn codex_config(&mut self, value: impl AsRef<OsStr>) {
+        self.container_command.push(OsString::from("--config"));
+        self.container_command.push(value.as_ref().to_owned());
     }
 
     fn finish(self) -> CommandSpec {
@@ -169,6 +240,7 @@ impl ContainerRunCommandBuilder {
         CommandSpec {
             program: OsString::from("container"),
             arguments,
+            secret_environment: self.secret_environment,
         }
     }
 }

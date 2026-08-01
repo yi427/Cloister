@@ -19,7 +19,7 @@ The first useful version will:
 - apply CPU, memory, locale, timezone, and guest-user settings;
 - expose the selected project through an explicit live bind mount;
 - keep Cloister-managed agent state separate from host credentials;
-- optionally expose an authenticated host shell escape hatch;
+- expose an authenticated host shell escape hatch to Codex by default;
 - make network and writable-mount choices visible before launch;
 - stop and remove environments without deleting the host project.
 
@@ -70,6 +70,43 @@ The command maps the current directory to `/workspace`, reuses
 owner-only permissions and mounts it as `CODEX_HOME`; it never mounts the
 host's existing `~/.codex`.
 
+The command also starts an authenticated MCP bridge on macOS loopback and
+injects it into Codex as `cloister_host`. Its only tool, `host.exec`, runs an
+arbitrary command as the macOS user running Cloister. Codex is configured to
+prompt before each call. The bearer token exists only for the process
+lifecycle, is forwarded by environment-variable name, and is never printed,
+persisted in `config.toml`, or mounted as a file.
+
+The prompt is a Codex MCP interaction policy, not a guest-process security
+boundary. The token is available to the Codex process and may be inherited by
+processes it starts. A guest process that obtains the token can call the bridge
+directly without a Codex approval prompt. Enabling the bridge by default
+therefore deliberately grants the guest a path to the macOS user's authority.
+
+Apple `container` must have a localhost DNS domain that forwards the guest name
+to macOS loopback. Create it once with:
+
+```sh
+sudo container system dns create \
+  host.container.internal \
+  --localhost 203.0.113.113
+```
+
+Confirm it with `container system dns list`. Apple documents that creating a
+localhost domain disables Private Relay and that its packet-filter rule is
+removed on restart. The MCP server is marked required, so Codex fails visibly
+instead of silently starting without `host.exec` when the bridge is not
+reachable.
+
+Disable this high-privilege capability for one invocation with:
+
+```sh
+cargo run -- codex --no-host-bridge
+```
+
+If port `17834` is already in use, select another loopback port with
+`--host-bridge-port`.
+
 Inspect this high-level launch without starting a container:
 
 ```sh
@@ -110,8 +147,8 @@ Check the example profile through the CLI:
 cargo run -- profile check examples/codex.toml
 ```
 
-The current Host Bridge prototype exposes one MCP tool, `host.exec`. Start it
-with an unused token path:
+The Host Bridge can also be started manually for diagnostics with an unused
+token path:
 
 ```sh
 cargo run -- host serve \
@@ -131,8 +168,7 @@ cargo run -- host exec \
 The token is generated with owner-only permissions and is never printed.
 The bridge refuses non-loopback listeners. `host.exec` deliberately allows
 arbitrary commands with the permissions of the macOS user running Cloister;
-using it gives the AI an escape hatch from the container boundary.
-Container-to-host transport wiring remains a later slice.
+using it gives the guest an escape hatch from the container boundary.
 
 ## Project layout
 

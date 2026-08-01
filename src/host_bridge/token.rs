@@ -21,6 +21,18 @@ pub struct BridgeToken {
 }
 
 impl BridgeToken {
+    /// Generates an in-memory token for one bridge lifecycle.
+    pub fn generate() -> Result<Self, BridgeTokenError> {
+        let mut bytes = [0_u8; TOKEN_BYTES];
+        getrandom::fill(&mut bytes).map_err(|source| BridgeTokenError::Random {
+            detail: source.to_string(),
+        })?;
+
+        Ok(Self {
+            encoded: URL_SAFE_NO_PAD.encode(bytes).into(),
+        })
+    }
+
     /// Loads an existing token file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, BridgeTokenError> {
         let path = path.as_ref();
@@ -50,13 +62,7 @@ impl BridgeToken {
             }
         }
 
-        let mut bytes = [0_u8; TOKEN_BYTES];
-        getrandom::fill(&mut bytes).map_err(|source| BridgeTokenError::Random {
-            detail: source.to_string(),
-        })?;
-        let token = Self {
-            encoded: URL_SAFE_NO_PAD.encode(bytes).into(),
-        };
+        let token = Self::generate()?;
 
         match create_token_file(path, token.encoded.as_bytes()) {
             Ok(()) => Ok(token),
@@ -245,6 +251,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{BridgeToken, BridgeTokenError};
+
+    #[test]
+    fn generates_an_in_memory_token_without_exposing_it_through_debug() {
+        let token = BridgeToken::generate().expect("token should be generated");
+
+        assert!(!token.secret().is_empty());
+        assert!(!format!("{token:?}").contains(token.secret()));
+    }
 
     #[test]
     fn creates_and_loads_an_owner_only_token() {

@@ -5,19 +5,30 @@ use std::{
     error::Error,
     ffi::OsString,
     fmt, fs, io,
+    net::SocketAddr,
+    num::NonZeroU16,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{ExitCode, ExitStatus},
 };
 
 use clap::{Args, ValueHint};
+use tokio::{net::TcpListener, task::JoinHandle};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     error::message,
+    host_bridge::{
+        BridgeToken, BridgeTokenError, HostBridgeServerError, serve as serve_host_bridge,
+    },
     preflight::{PreflightError, resolve_launch},
     profile::{AgentState, LoadProfileError, Profile},
-    runtime::{RuntimeExecutionError, RuntimePlanError, execute, plan_codex_container},
+    runtime::{
+        HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError, execute, plan_codex_container,
+    },
 };
+
+const HOST_BRIDGE_GUEST_NAME: &str = "host.container.internal";
 
 #[derive(Debug, Args)]
 pub(super) struct CodexArgs {
@@ -36,6 +47,14 @@ pub(super) struct CodexArgs {
     /// Print the runtime plan without starting Codex.
     #[arg(long)]
     dry_run: bool,
+
+    /// Disable the default authenticated macOS host.exec MCP bridge.
+    #[arg(long)]
+    no_host_bridge: bool,
+
+    /// Loopback port used by the default host bridge.
+    #[arg(long, default_value = "17834", value_name = "PORT")]
+    host_bridge_port: NonZeroU16,
 
     /// Arguments passed directly to Codex.
     #[arg(last = true, value_name = "ARGUMENT")]
@@ -56,15 +75,107 @@ impl CodexArgs {
             AgentState::Shared if self.dry_run => Some(codex_state_directory_path()?),
             AgentState::Shared => Some(prepare_codex_state_directory()?),
         };
-        let plan = plan_codex_container(&resolved, shared_state.as_deref(), &self.arguments)?;
-
         if self.dry_run {
+            let endpoint = host_bridge_endpoint(self.host_bridge_port);
+            let host_bridge =
+                (!self.no_host_bridge).then(|| HostBridgeLaunch::dry_run(endpoint.as_str()));
+            let plan = plan_codex_container(
+                &resolved,
+                shared_state.as_deref(),
+                host_bridge,
+                &self.arguments,
+            )?;
             print!("{plan}");
             return Ok(ExitCode::SUCCESS);
         }
 
-        let status = execute(plan.command()).await?;
-        Ok(child_exit_code(status))
+        let host_bridge = if self.no_host_bridge {
+            None
+        } else {
+            Some(RunningHostBridge::start(self.host_bridge_port).await?)
+        };
+        let bridge_launch = host_bridge.as_ref().map(RunningHostBridge::launch);
+        let plan = match plan_codex_container(
+            &resolved,
+            shared_state.as_deref(),
+            bridge_launch,
+            &self.arguments,
+        ) {
+            Ok(plan) => plan,
+            Err(error) => {
+                if let Some(bridge) = host_bridge {
+                    bridge.shutdown().await?;
+                }
+                return Err(error.into());
+            }
+        };
+
+        if let Some(bridge) = &host_bridge {
+            bridge.announce();
+        }
+        let execution = execute(plan.command()).await;
+        let shutdown = match host_bridge {
+            Some(bridge) => bridge.shutdown().await,
+            None => Ok(()),
+        };
+
+        match (execution, shutdown) {
+            (Err(error), _) => Err(error.into()),
+            (Ok(_), Err(error)) => Err(error),
+            (Ok(status), Ok(())) => Ok(child_exit_code(status)),
+        }
+    }
+}
+
+fn host_bridge_endpoint(port: NonZeroU16) -> String {
+    format!("http://{HOST_BRIDGE_GUEST_NAME}:{port}/mcp")
+}
+
+struct RunningHostBridge {
+    token: BridgeToken,
+    endpoint: String,
+    cancellation: CancellationToken,
+    task: JoinHandle<Result<(), HostBridgeServerError>>,
+}
+
+impl RunningHostBridge {
+    async fn start(port: NonZeroU16) -> Result<Self, CodexCommandError> {
+        let token = BridgeToken::generate()?;
+        let address = SocketAddr::from(([127, 0, 0, 1], port.get()));
+        let listener = TcpListener::bind(address)
+            .await
+            .map_err(|source| CodexCommandError::BridgeListen { address, source })?;
+        let cancellation = CancellationToken::new();
+        let server_cancellation = cancellation.clone();
+        let server_token = token.clone();
+        let task = tokio::spawn(async move {
+            serve_host_bridge(listener, server_token, server_cancellation).await
+        });
+
+        Ok(Self {
+            token,
+            endpoint: host_bridge_endpoint(port),
+            cancellation,
+            task,
+        })
+    }
+
+    fn launch(&self) -> HostBridgeLaunch<'_> {
+        HostBridgeLaunch::new(&self.endpoint, self.token.secret())
+    }
+
+    fn announce(&self) {
+        println!("Host bridge: {}", self.endpoint);
+        println!("Host capability: host.exec (arbitrary macOS user commands)");
+        println!("Codex MCP approval: prompt");
+    }
+
+    async fn shutdown(self) -> Result<(), CodexCommandError> {
+        self.cancellation.cancel();
+        self.task
+            .await
+            .map_err(CodexCommandError::BridgeTask)?
+            .map_err(CodexCommandError::BridgeServer)
     }
 }
 
@@ -148,6 +259,13 @@ pub(super) enum CodexCommandError {
         path: PathBuf,
         kind: AgentStateDirectoryErrorKind,
     },
+    BridgeListen {
+        address: SocketAddr,
+        source: io::Error,
+    },
+    BridgeServer(HostBridgeServerError),
+    BridgeTask(tokio::task::JoinError),
+    BridgeToken(BridgeTokenError),
     CurrentDirectory(io::Error),
     Execution(RuntimeExecutionError),
     HomeDirectoryMissing,
@@ -188,6 +306,16 @@ impl fmt::Display for CodexCommandError {
                     AgentStateDirectoryErrorKind::Invalid => Ok(()),
                 }
             }
+            Self::BridgeListen { address, source } => write!(
+                formatter,
+                "{} on {address}: {source}",
+                message::BRIDGE_LISTEN_FAILED
+            ),
+            Self::BridgeServer(error) => error.fmt(formatter),
+            Self::BridgeTask(error) => {
+                write!(formatter, "{}: {error}", message::BRIDGE_SERVE_FAILED)
+            }
+            Self::BridgeToken(error) => error.fmt(formatter),
             Self::CurrentDirectory(source) => {
                 write!(formatter, "{}: {source}", message::CURRENT_DIRECTORY_FAILED)
             }
@@ -209,6 +337,10 @@ impl Error for CodexCommandError {
                 | AgentStateDirectoryErrorKind::Permissions(source) => Some(source),
                 AgentStateDirectoryErrorKind::Invalid => None,
             },
+            Self::BridgeListen { source, .. } => Some(source),
+            Self::BridgeServer(error) => Some(error),
+            Self::BridgeTask(error) => Some(error),
+            Self::BridgeToken(error) => Some(error),
             Self::CurrentDirectory(source) => Some(source),
             Self::Execution(error) => Some(error),
             Self::HomeDirectoryMissing => None,
@@ -234,5 +366,11 @@ impl From<RuntimePlanError> for CodexCommandError {
 impl From<RuntimeExecutionError> for CodexCommandError {
     fn from(error: RuntimeExecutionError) -> Self {
         Self::Execution(error)
+    }
+}
+
+impl From<BridgeTokenError> for CodexCommandError {
+    fn from(error: BridgeTokenError) -> Self {
+        Self::BridgeToken(error)
     }
 }

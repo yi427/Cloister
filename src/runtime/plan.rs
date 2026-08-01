@@ -13,6 +13,7 @@ pub struct RuntimePlan {
     pub(super) network: NetworkExposure,
     pub(super) workspace: WorkspaceMount,
     pub(super) codex_state: Option<CodexStateMount>,
+    pub(super) host_bridge_endpoint: Option<String>,
     pub(super) command: CommandSpec,
 }
 
@@ -31,6 +32,10 @@ impl RuntimePlan {
 
     pub fn codex_state(&self) -> Option<&CodexStateMount> {
         self.codex_state.as_ref()
+    }
+
+    pub fn host_bridge_endpoint(&self) -> Option<&str> {
+        self.host_bridge_endpoint.as_deref()
     }
 
     pub fn command(&self) -> &CommandSpec {
@@ -62,6 +67,20 @@ impl fmt::Display for RuntimePlan {
         } else {
             writeln!(formatter, "Codex state: ephemeral")?;
         }
+        if let Some(endpoint) = &self.host_bridge_endpoint {
+            writeln!(formatter, "Host bridge: {endpoint}")?;
+            writeln!(
+                formatter,
+                "Host capability: host.exec (arbitrary macOS user commands)"
+            )?;
+            writeln!(formatter, "Codex MCP approval: prompt")?;
+            writeln!(
+                formatter,
+                "Host bridge token: ephemeral, forwarded, and redacted"
+            )?;
+        } else {
+            writeln!(formatter, "Host bridge: disabled")?;
+        }
 
         writeln!(formatter, "Agent: Codex")?;
         writeln!(formatter, "Lifecycle: run and remove after exit")?;
@@ -70,6 +89,13 @@ impl fmt::Display for RuntimePlan {
         writeln!(formatter, "  arguments:")?;
         for (index, argument) in self.command.arguments.iter().enumerate() {
             writeln!(formatter, "    [{index}] {argument:?}")?;
+        }
+        for variable in &self.command.secret_environment {
+            writeln!(
+                formatter,
+                "  host environment: {:?}=[REDACTED]",
+                variable.name
+            )?;
         }
 
         Ok(())
@@ -98,6 +124,7 @@ impl CodexStateMount {
 pub struct CommandSpec {
     pub(super) program: OsString,
     pub(super) arguments: Vec<OsString>,
+    pub(super) secret_environment: Vec<SecretEnvironmentVariable>,
 }
 
 impl CommandSpec {
@@ -107,6 +134,45 @@ impl CommandSpec {
 
     pub fn arguments(&self) -> &[OsString] {
         &self.arguments
+    }
+
+    pub fn secret_environment_names(&self) -> impl Iterator<Item = &OsStr> {
+        self.secret_environment
+            .iter()
+            .map(|variable| variable.name.as_os_str())
+    }
+
+    pub(super) fn secret_environment(&self) -> &[SecretEnvironmentVariable] {
+        &self.secret_environment
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct SecretEnvironmentVariable {
+    pub(super) name: OsString,
+    value: OsString,
+}
+
+impl SecretEnvironmentVariable {
+    pub(super) fn new(name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> Self {
+        Self {
+            name: name.as_ref().to_owned(),
+            value: value.as_ref().to_owned(),
+        }
+    }
+
+    pub(super) fn value(&self) -> &OsStr {
+        &self.value
+    }
+}
+
+impl fmt::Debug for SecretEnvironmentVariable {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretEnvironmentVariable")
+            .field("name", &self.name)
+            .field("value", &"[REDACTED]")
+            .finish()
     }
 }
 
