@@ -13,7 +13,7 @@ fn write_default_profile(home: &Path) {
     fs::create_dir_all(config.parent().expect("config should have a parent"))
         .expect("config directory should be created");
     fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"),
         config,
     )
     .expect("default profile should be written");
@@ -34,6 +34,25 @@ fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[
 }
 
 #[test]
+fn keeps_the_codex_specific_command_help() {
+    let directory = tempdir().expect("temporary directory should exist");
+
+    let output = run(
+        directory.path(),
+        directory.path(),
+        None,
+        &["codex", "--help"],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(stdout.contains("Path to a Profile V4 TOML file"));
+    assert!(stdout.contains("Print the runtime plan without starting Codex"));
+    assert!(stdout.contains("Arguments passed directly to Codex"));
+}
+
+#[test]
 fn default_profile_uses_current_directory_and_shared_codex_state() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
@@ -48,7 +67,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Profile: codex-default"));
+    assert!(stdout.contains("Profile: default"));
     assert!(stdout.contains(&format!(
         "Workspace: {} -> /workspace (read-write)",
         canonical_project.display()
@@ -130,7 +149,7 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
         .expect("fake container runtime should be written");
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755))
         .expect("fake runtime should be executable");
-    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml");
+    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml");
 
     let output = run(
         &home,
@@ -181,7 +200,7 @@ fn starts_the_default_bridge_and_forwards_only_the_token_name() {
     .expect("fake container runtime should be written");
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755))
         .expect("fake runtime should be executable");
-    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml");
+    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml");
 
     let output = run(
         &home,

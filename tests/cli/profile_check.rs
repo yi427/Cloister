@@ -54,13 +54,13 @@ fn reports_a_profile_parse_error() {
 }
 
 #[test]
-fn reports_a_profile_validation_error() {
+fn reports_an_unsupported_profile_version() {
     let path = fixture("invalid/unsupported-schema.toml");
     let output = run(&["profile", "check", path.to_str().expect("UTF-8 path")]);
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert!(stderr.contains("profile validation failed"));
+    assert!(stderr.contains("failed to parse profile"));
     assert!(stderr.contains("schema_version is not supported"));
 }

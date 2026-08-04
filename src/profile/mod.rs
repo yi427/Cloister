@@ -7,7 +7,7 @@ mod validation;
 
 pub use loader::{LoadProfileError, load_profile};
 pub use model::{
-    AgentState, Architecture, CodexProfile, CpuCount, GuestProfile, ImageProfile, MemorySize,
+    AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, ImageProfile, MemorySize,
     NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION, ParseMemorySizeError, Profile,
 };
 pub use parser::{ParseProfileError, parse_profile};

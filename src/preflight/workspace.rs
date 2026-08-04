@@ -16,7 +16,7 @@ pub struct ResolvedLaunch {
 }
 
 impl ResolvedLaunch {
-    /// Validated environment and Codex policy.
+    /// Validated environment and agent policy.
     pub fn profile(&self) -> &Profile {
         &self.profile
     }

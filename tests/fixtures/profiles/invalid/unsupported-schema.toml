@@ -1,4 +1,4 @@
-schema_version = 4
+schema_version = 3
 name = "unsupported-schema"
 
 [image]

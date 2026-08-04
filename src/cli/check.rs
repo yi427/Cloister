@@ -17,7 +17,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct CheckArgs {
-    /// Path to a Profile V3 TOML file.
+    /// Path to a Profile V4 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]

@@ -5,12 +5,13 @@ use std::{
 };
 
 use cloister::{
+    agent::CodexAgent,
     preflight::resolve_launch,
     profile::{AgentState, load_profile},
     runtime::{
         HOST_BRIDGE_GUEST_NAME, HOST_BRIDGE_LOCALHOST_ADDRESS, HostBridgeLaunch, NetworkExposure,
         dns_create_command, dns_list_command, image_inspect_command, image_pull_command,
-        plan_codex_container, system_start_command, system_status_command,
+        plan_agent_container, system_start_command, system_status_command,
     },
 };
 use tempfile::tempdir;
@@ -27,7 +28,8 @@ fn default_plan() -> cloister::runtime::RuntimePlan {
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
 
-    plan_codex_container(&resolved, None, None, &[]).expect("default profile should produce a plan")
+    plan_agent_container(&resolved, &CodexAgent, None, None, &[])
+        .expect("default profile should produce a plan")
 }
 
 fn argument_after<'a>(arguments: &'a [OsString], option: &str) -> &'a OsStr {
@@ -87,7 +89,8 @@ fn translates_every_supported_codex_setting() {
 
     assert_eq!(plan.profile_name(), "rust-default");
     assert_eq!(plan.network(), NetworkExposure::DefaultWithInternetEgress);
-    assert!(plan.codex_state().is_none());
+    assert_eq!(plan.agent_name(), "Codex");
+    assert!(plan.agent_state().is_none());
     assert_eq!(plan.command().program(), OsStr::new("container"));
     assert_eq!(
         arguments.first().map(OsString::as_os_str),
@@ -152,8 +155,8 @@ fn rejects_a_mount_path_that_container_cannot_represent() {
     fs::create_dir(&workspace).expect("workspace should be created");
     let resolved = resolve_launch(profile, workspace).expect("host workspace should resolve");
 
-    let error =
-        plan_codex_container(&resolved, None, None, &[]).expect_err("comma mount path should fail");
+    let error = plan_agent_container(&resolved, &CodexAgent, None, None, &[])
+        .expect_err("comma mount path should fail");
 
     assert!(error.to_string().contains("must not contain ','"));
 }
@@ -169,7 +172,7 @@ fn appends_codex_arguments_without_shell_parsing() {
         OsString::from("model_reasoning_effort=high"),
     ];
 
-    let plan = plan_codex_container(&resolved, None, None, &arguments)
+    let plan = plan_agent_container(&resolved, &CodexAgent, None, None, &arguments)
         .expect("Codex launch should produce plan");
 
     assert!(plan.command().arguments().ends_with(&[
@@ -184,15 +187,15 @@ fn appends_codex_arguments_without_shell_parsing() {
 fn mounts_shared_codex_state_and_sets_codex_home() {
     let path = fixture("valid/default.toml");
     let mut profile = load_profile(&path).expect("default profile should load");
-    profile.codex.state = AgentState::Shared;
+    profile.agent.state = AgentState::Shared;
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let state = fixture("valid");
 
-    let plan = plan_codex_container(&resolved, Some(&state), None, &[])
+    let plan = plan_agent_container(&resolved, &CodexAgent, Some(&state), None, &[])
         .expect("shared Codex state should produce a plan");
     let arguments = plan.command().arguments();
-    let mount = plan.codex_state().expect("Codex state should be mounted");
+    let mount = plan.agent_state().expect("Codex state should be mounted");
     let expected_mount = OsString::from(format!(
         "type=bind,source={},target=/cloister/agents/codex",
         state.display()
@@ -216,11 +219,11 @@ fn mounts_shared_codex_state_and_sets_codex_home() {
 fn shared_codex_state_requires_a_host_directory() {
     let path = fixture("valid/default.toml");
     let mut profile = load_profile(&path).expect("default profile should load");
-    profile.codex.state = AgentState::Shared;
+    profile.agent.state = AgentState::Shared;
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
 
-    let error = plan_codex_container(&resolved, None, None, &[])
+    let error = plan_agent_container(&resolved, &CodexAgent, None, None, &[])
         .expect_err("shared state without a directory should fail");
 
     assert!(error.to_string().contains("shared Codex state requires"));
@@ -235,8 +238,9 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     let endpoint = "http://host.container.internal:17834/mcp";
     let token = "sensitive-bridge-token";
 
-    let plan = plan_codex_container(
+    let plan = plan_agent_container(
         &resolved,
+        &CodexAgent,
         None,
         Some(HostBridgeLaunch::new(endpoint, token)),
         &[],

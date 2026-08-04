@@ -10,9 +10,10 @@ use std::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimePlan {
     pub(super) profile_name: String,
+    pub(super) agent_name: String,
     pub(super) network: NetworkExposure,
     pub(super) workspace: WorkspaceMount,
-    pub(super) codex_state: Option<CodexStateMount>,
+    pub(super) agent_state: Option<AgentStateMount>,
     pub(super) host_bridge_endpoint: Option<String>,
     pub(super) command: CommandSpec,
 }
@@ -20,6 +21,10 @@ pub struct RuntimePlan {
 impl RuntimePlan {
     pub fn profile_name(&self) -> &str {
         &self.profile_name
+    }
+
+    pub fn agent_name(&self) -> &str {
+        &self.agent_name
     }
 
     pub const fn network(&self) -> NetworkExposure {
@@ -30,8 +35,8 @@ impl RuntimePlan {
         &self.workspace
     }
 
-    pub fn codex_state(&self) -> Option<&CodexStateMount> {
-        self.codex_state.as_ref()
+    pub fn agent_state(&self) -> Option<&AgentStateMount> {
+        self.agent_state.as_ref()
     }
 
     pub fn host_bridge_endpoint(&self) -> Option<&str> {
@@ -57,15 +62,16 @@ impl fmt::Display for RuntimePlan {
         )?;
         writeln!(formatter, "SSH agent forwarding: disabled")?;
         writeln!(formatter, "Host credential mounts: none")?;
-        if let Some(state) = &self.codex_state {
+        if let Some(state) = &self.agent_state {
             writeln!(
                 formatter,
-                "Codex state: {} -> {} (shared across projects)",
+                "{} state: {} -> {} (shared across projects)",
+                self.agent_name,
                 state.host.display(),
                 state.guest.display()
             )?;
         } else {
-            writeln!(formatter, "Codex state: ephemeral")?;
+            writeln!(formatter, "{} state: ephemeral", self.agent_name)?;
         }
         if let Some(endpoint) = &self.host_bridge_endpoint {
             writeln!(formatter, "Host bridge: {endpoint}")?;
@@ -73,7 +79,7 @@ impl fmt::Display for RuntimePlan {
                 formatter,
                 "Host capability: host.exec (arbitrary macOS user commands)"
             )?;
-            writeln!(formatter, "Codex MCP approval: prompt")?;
+            writeln!(formatter, "{} MCP approval: prompt", self.agent_name)?;
             writeln!(
                 formatter,
                 "Host bridge token: ephemeral, forwarded, and redacted"
@@ -82,7 +88,7 @@ impl fmt::Display for RuntimePlan {
             writeln!(formatter, "Host bridge: disabled")?;
         }
 
-        writeln!(formatter, "Agent: Codex")?;
+        writeln!(formatter, "Agent: {}", self.agent_name)?;
         writeln!(formatter, "Lifecycle: run and remove after exit")?;
         writeln!(formatter, "Command:")?;
         writeln!(formatter, "  program: {:?}", self.command.program)?;
@@ -102,14 +108,14 @@ impl fmt::Display for RuntimePlan {
     }
 }
 
-/// Cloister-managed persistent state exposed to Codex.
+/// Cloister-managed persistent state exposed to one agent.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CodexStateMount {
+pub struct AgentStateMount {
     pub(super) host: PathBuf,
     pub(super) guest: PathBuf,
 }
 
-impl CodexStateMount {
+impl AgentStateMount {
     pub fn host(&self) -> &Path {
         &self.host
     }

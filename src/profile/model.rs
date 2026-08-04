@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 3;
+pub const PROFILE_SCHEMA_VERSION: u32 = 4;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -29,7 +29,7 @@ pub struct Profile {
     #[garde(skip)]
     pub network: NetworkProfile,
     #[garde(skip)]
-    pub codex: CodexProfile,
+    pub agent: AgentProfile,
 }
 
 /// OCI image selection for the guest environment.
@@ -161,7 +161,7 @@ impl<'de> Deserialize<'de> for MemorySize {
     }
 }
 
-/// Reason a memory size could not be represented by Profile V3.
+/// Reason a memory size could not be represented by Profile V4.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParseMemorySizeError {
     InvalidFormat,
@@ -195,10 +195,10 @@ pub enum NetworkMode {
     Default,
 }
 
-/// Codex-specific runtime policy.
+/// Runtime policy shared by supported coding agents.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CodexProfile {
+pub struct AgentProfile {
     pub state: AgentState,
 }
 

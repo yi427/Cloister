@@ -1,5 +1,6 @@
 //! Command-line interface for Cloister.
 
+mod agent;
 mod check;
 mod codex;
 mod config;
@@ -61,7 +62,7 @@ impl Command {
     async fn execute(self) -> Result<ExitCode, CliError> {
         match self {
             Self::Check(arguments) => Ok(arguments.execute().await),
-            Self::Codex(arguments) => arguments.execute().await.map_err(CliError::Codex),
+            Self::Codex(arguments) => arguments.execute().await.map_err(CliError::Agent),
             Self::Host(arguments) => arguments
                 .execute()
                 .await
@@ -78,7 +79,7 @@ impl Command {
 
 #[derive(Debug)]
 enum CliError {
-    Codex(codex::CodexCommandError),
+    Agent(agent::AgentCommandError),
     Host(host::HostCommandError),
     Init(init::InitCommandError),
     Profile(profile::ProfileCommandError),
@@ -87,7 +88,7 @@ enum CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Codex(error) => error.fmt(formatter),
+            Self::Agent(error) => error.fmt(formatter),
             Self::Host(error) => error.fmt(formatter),
             Self::Init(error) => error.fmt(formatter),
             Self::Profile(error) => error.fmt(formatter),
@@ -98,7 +99,7 @@ impl fmt::Display for CliError {
 impl Error for CliError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Codex(error) => Some(error),
+            Self::Agent(error) => Some(error),
             Self::Host(error) => Some(error),
             Self::Init(error) => Some(error),
             Self::Profile(error) => Some(error),

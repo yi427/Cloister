@@ -1,6 +1,6 @@
 # ADR 0003: Natural agent entry point and shared state
 
-- Status: Accepted for MVP
+- Status: Accepted for MVP, amended 2026-08-05
 - Date: 2026-07-29
 
 ## Context
@@ -48,9 +48,12 @@ There is no embedded fallback Profile. A missing default file is an explicit
 configuration error.
 
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` replace their respective home-relative
-base directories when set. The Profile controls image, resources, guest
-settings, explicit default networking, and whether Codex state is `shared` or
-`isolated`.
+base directories when set. Profile V4 controls image, resources, guest
+settings, explicit default networking, and a generic `[agent]` state policy.
+That policy is either `shared` or `isolated` and applies to every supported
+agent, while each agent receives a separate Cloister-managed state directory.
+The development version deliberately rejects Profile V3 and its former
+`[codex]` table without aliases, migration, or inferred defaults.
 Workspace selection belongs to each CLI invocation, not the Profile.
 
 The natural entry point also enables the authenticated `cloister_host` MCP

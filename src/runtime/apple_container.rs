@@ -1,4 +1,4 @@
-//! Translation from a resolved Codex launch to Apple container arguments.
+//! Translation from a resolved agent launch to Apple container arguments.
 
 use std::{
     error::Error,
@@ -8,17 +8,17 @@ use std::{
 };
 
 use crate::{
+    agent::{AgentAdapter, AgentCommand, AgentHostBridge},
     error::message,
     preflight::ResolvedLaunch,
     profile::{AgentState, Architecture, NetworkMode, Profile},
 };
 
 use super::plan::{
-    CodexStateMount, CommandSpec, NetworkExposure, RuntimePlan, SecretEnvironmentVariable,
+    AgentStateMount, CommandSpec, NetworkExposure, RuntimePlan, SecretEnvironmentVariable,
     WorkspaceMount,
 };
 
-const CODEX_STATE_GUEST_PATH: &str = "/cloister/agents/codex";
 const HOST_BRIDGE_TOKEN_ENVIRONMENT: &str = "CLOISTER_HOST_BRIDGE_TOKEN";
 const WORKSPACE_GUEST_PATH: &str = "/workspace";
 
@@ -84,7 +84,7 @@ fn apple_container_command<'a>(arguments: impl IntoIterator<Item = &'a str>) -> 
     }
 }
 
-/// Transient MCP endpoint and bearer token injected for one Codex invocation.
+/// Transient MCP endpoint and bearer token injected for one agent invocation.
 #[derive(Clone, Copy)]
 pub struct HostBridgeLaunch<'a> {
     endpoint: &'a str,
@@ -117,12 +117,13 @@ impl fmt::Debug for HostBridgeLaunch<'_> {
     }
 }
 
-/// Produces an inspectable Codex launch plan without starting a process.
-pub fn plan_codex_container(
+/// Produces an inspectable agent launch plan without starting a process.
+pub fn plan_agent_container(
     resolved: &ResolvedLaunch,
+    agent: &dyn AgentAdapter,
     shared_state: Option<&Path>,
     host_bridge: Option<HostBridgeLaunch<'_>>,
-    codex_arguments: &[OsString],
+    agent_arguments: &[OsString],
 ) -> Result<RuntimePlan, RuntimePlanError> {
     reject_mount_separator(resolved.workspace())?;
 
@@ -130,30 +131,37 @@ pub fn plan_codex_container(
         host: resolved.workspace().to_owned(),
         guest: WORKSPACE_GUEST_PATH.into(),
     };
-    let codex_state = match resolved.profile().codex.state {
+    let agent_state = match resolved.profile().agent.state {
         AgentState::Isolated => None,
         AgentState::Shared => {
-            let host = shared_state.ok_or(RuntimePlanError::SharedCodexStateMissing)?;
+            let host = shared_state.ok_or(RuntimePlanError::SharedAgentStateMissing {
+                agent: agent.display_name(),
+            })?;
             reject_mount_separator(host)?;
-            Some(CodexStateMount {
+            Some(AgentStateMount {
                 host: host.to_owned(),
-                guest: CODEX_STATE_GUEST_PATH.into(),
+                guest: agent.shared_state_guest_path().to_owned(),
             })
         }
     };
+    let agent_bridge = host_bridge
+        .map(|bridge| AgentHostBridge::new(bridge.endpoint, HOST_BRIDGE_TOKEN_ENVIRONMENT));
+    let agent_command = agent.build_command(agent_bridge, agent_arguments);
     let command = build_run_command(
         resolved.profile(),
         &workspace,
-        codex_state.as_ref(),
+        agent,
+        agent_state.as_ref(),
         host_bridge,
-        codex_arguments,
+        agent_command,
     );
 
     Ok(RuntimePlan {
         profile_name: resolved.profile().name.clone(),
+        agent_name: agent.display_name().to_owned(),
         network: network_exposure(resolved.profile().network.mode),
         workspace,
-        codex_state,
+        agent_state,
         host_bridge_endpoint: host_bridge.map(|bridge| bridge.endpoint.to_owned()),
         command,
     })
@@ -162,9 +170,10 @@ pub fn plan_codex_container(
 fn build_run_command(
     profile: &Profile,
     workspace: &WorkspaceMount,
-    codex_state: Option<&CodexStateMount>,
+    agent: &dyn AgentAdapter,
+    agent_state: Option<&AgentStateMount>,
     host_bridge: Option<HostBridgeLaunch<'_>>,
-    codex_arguments: &[OsString],
+    agent_command: AgentCommand,
 ) -> CommandSpec {
     let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
 
@@ -178,8 +187,8 @@ fn build_run_command(
     command.environment("LANG", &profile.guest.locale);
     command.environment("LC_ALL", &profile.guest.locale);
     command.environment("TZ", &profile.guest.timezone);
-    if let Some(state) = codex_state {
-        command.environment("CODEX_HOME", state.guest());
+    if let Some(state) = agent_state {
+        command.environment(agent.state_environment(), state.guest());
     }
     if let Some(bridge) = host_bridge {
         command.forward_secret_environment(HOST_BRIDGE_TOKEN_ENVIRONMENT, bridge.bearer_token);
@@ -194,12 +203,12 @@ fn build_run_command(
         "--mount",
         bind_mount_argument(workspace.host(), workspace.guest()),
     );
-    if let Some(state) = codex_state {
+    if let Some(state) = agent_state {
         command.option("--mount", bind_mount_argument(state.host(), state.guest()));
     }
     command.option("--label", format!("org.cloister.profile={}", profile.name));
 
-    command.codex_command(host_bridge, codex_arguments);
+    command.agent_command(agent_command);
     command.finish()
 }
 
@@ -255,7 +264,7 @@ impl ContainerRunCommandBuilder {
         self.options.push(value.as_ref().to_owned());
     }
 
-    fn environment(&mut self, name: &'static str, value: impl AsRef<OsStr>) {
+    fn environment(&mut self, name: &str, value: impl AsRef<OsStr>) {
         let mut assignment = OsString::from(name);
         assignment.push("=");
         assignment.push(value);
@@ -270,26 +279,10 @@ impl ContainerRunCommandBuilder {
         }
     }
 
-    fn codex_command(&mut self, host_bridge: Option<HostBridgeLaunch<'_>>, arguments: &[OsString]) {
-        self.container_command.push(OsString::from("codex"));
-        if let Some(bridge) = host_bridge {
-            self.codex_config(format!(
-                "mcp_servers.cloister_host.url=\"{}\"",
-                bridge.endpoint
-            ));
-            self.codex_config(format!(
-                "mcp_servers.cloister_host.bearer_token_env_var=\"{HOST_BRIDGE_TOKEN_ENVIRONMENT}\""
-            ));
-            self.codex_config("mcp_servers.cloister_host.required=true");
-            self.codex_config("mcp_servers.cloister_host.enabled_tools=[\"host.exec\"]");
-            self.codex_config("mcp_servers.cloister_host.default_tools_approval_mode=\"prompt\"");
-        }
-        self.container_command.extend_from_slice(arguments);
-    }
-
-    fn codex_config(&mut self, value: impl AsRef<OsStr>) {
-        self.container_command.push(OsString::from("--config"));
-        self.container_command.push(value.as_ref().to_owned());
+    fn agent_command(&mut self, command: AgentCommand) {
+        let (executable, arguments) = command.into_parts();
+        self.container_command.push(executable);
+        self.container_command.extend(arguments);
     }
 
     fn finish(self) -> CommandSpec {
@@ -321,7 +314,7 @@ fn reject_mount_separator(path: &Path) -> Result<(), RuntimePlanError> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuntimePlanError {
     MountPathContainsSeparator { path: OsString },
-    SharedCodexStateMissing,
+    SharedAgentStateMissing { agent: &'static str },
 }
 
 impl fmt::Display for RuntimePlanError {
@@ -333,9 +326,11 @@ impl fmt::Display for RuntimePlanError {
                 message::MOUNT_PATH_CONTAINS_SEPARATOR,
                 OsStr::new(path)
             ),
-            Self::SharedCodexStateMissing => {
-                formatter.write_str(message::SHARED_CODEX_STATE_MISSING)
-            }
+            Self::SharedAgentStateMissing { agent } => write!(
+                formatter,
+                "shared {agent} {}",
+                message::SHARED_AGENT_STATE_MISSING
+            ),
         }
     }
 }

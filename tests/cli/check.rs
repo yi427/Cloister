@@ -39,7 +39,7 @@ fn reports_a_ready_default_environment_without_writing_state() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("[PASS] Profile: 'codex-default'"));
+    assert!(stdout.contains("[PASS] Profile: 'default'"));
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
     assert!(stdout.contains("[PASS] Image: 'cloister:dev' (linux/arm64)"));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
@@ -56,7 +56,7 @@ fn accepts_an_explicit_profile_path() {
     let home = directory.path().join("home");
     let project = directory.path().join("project");
     let bin = directory.path().join("bin");
-    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml");
+    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml");
     fs::create_dir_all(&project).expect("project should be created");
     write_runtime(&bin, HEALTHY_RUNTIME);
 
@@ -171,7 +171,7 @@ fn write_default_profile(home: &Path) {
     fs::create_dir_all(config.parent().expect("config should have a parent"))
         .expect("config directory should be created");
     fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/codex.toml"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"),
         config,
     )
     .expect("default profile should be written");

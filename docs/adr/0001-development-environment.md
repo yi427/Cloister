@@ -67,13 +67,14 @@ Profiles are versioned TOML documents. The current schema covers:
 - CPU and memory limits;
 - guest user, locale, and timezone;
 - network policy;
-- Codex state policy.
+- agent state policy.
 
 ADR 0003 later moved workspace selection out of the Profile. The CLI selects a
 host directory for each invocation and mounts it at `/workspace`.
 
 Unknown schema versions and unknown security-sensitive values must fail closed.
-The example profile is not yet a stable public schema.
+The Profile schema is a public contract. Breaking changes require a new schema
+version even while the product is still under development.
 
 ### Workspace modes
 
@@ -95,7 +96,7 @@ metadata, symlink, and crash-recovery semantics can be specified.
 Cloister will not mount the host's home directory, SSH agent socket,
 `~/.ssh`, `~/.aws`, `~/.codex`, or `~/.claude` by default.
 
-ADR 0003 later allows an explicit shared Codex state policy. Interactive
+ADR 0003 later allows an explicit shared agent state policy. Interactive
 device-code or browser authentication and secrets passed through standard input
 are preferred over command-line arguments. Persistent agent state must be
 stored separately from the project and must be removable without deleting the

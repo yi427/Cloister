@@ -89,6 +89,7 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     let profile_path = home.join(".config/cloister/profile.toml");
     let profile = load_profile(&profile_path).expect("generated Profile should load");
+    let profile_source = fs::read_to_string(&profile_path).expect("Profile should be readable");
 
     assert!(
         output.status.success(),
@@ -100,7 +101,10 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
     assert_eq!(profile.image.reference, "ghcr.io/yi427/cloister:0.1.0");
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.to_string(), "8G");
-    assert_eq!(profile.codex.state, AgentState::Shared);
+    assert_eq!(profile.agent.state, AgentState::Shared);
+    assert!(profile_source.contains("schema_version = 4"));
+    assert!(profile_source.contains("[agent]"));
+    assert!(!profile_source.contains("[codex]"));
     assert_eq!(
         fs::metadata(&profile_path)
             .expect("Profile metadata should exist")
@@ -110,6 +114,14 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
         0o600
     );
     assert!(stdout.contains("Created Profile at"));
+    assert!(stdout.contains(
+        "Persist agent credentials, settings, and session history across projects? [Y/n]:"
+    ));
+    assert!(
+        stdout.contains(
+            "Agent state: shared (separate per agent; may contain credentials and history)"
+        )
+    );
     assert!(stdout.contains("Running: container system start"));
     assert!(
         stdout.contains("Running: container image pull --arch arm64 ghcr.io/yi427/cloister:0.1.0")

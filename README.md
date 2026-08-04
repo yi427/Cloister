@@ -35,7 +35,7 @@ transparent bidirectional file synchronization.
 - Agent runtime direction: Node.js LTS plus pinned Codex and Claude Code builds
 
 The current profile shape is illustrated in
-[`examples/codex.toml`](examples/codex.toml). Architectural and security
+[`examples/profile.toml`](examples/profile.toml). Architectural and security
 decisions are recorded in
 [`docs/adr/0001-development-environment.md`](docs/adr/0001-development-environment.md).
 
@@ -136,7 +136,9 @@ cargo run -- init
 ```
 
 `init` asks for the Profile name, exact image reference, guest CPU and memory
-limits, and whether Codex state should persist across projects. Its release-image
+limits, and whether agent credentials, settings, and session history should
+persist across projects. The policy applies to every supported agent while each
+agent keeps a separate Cloister-managed state directory. Its release-image
 default is derived from the CLI version, for example
 `ghcr.io/yi427/cloister:0.1.0`. A source checkout can explicitly select the
 locally built `cloister:dev` image instead.
@@ -175,16 +177,18 @@ check fails.
 Select a non-default Profile explicitly when needed:
 
 ```sh
-cargo run -- check --profile examples/codex.toml
+cargo run -- check --profile examples/profile.toml
 ```
 
 `cloister profile check <path>` remains the narrower static Profile validation
 command; it does not inspect the host runtime, image store, or DNS setup.
 
-`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. A Codex Profile can set
-`state = "isolated"` for temporary per-container state instead of the default
-cross-project shared state. Shared state can contain authentication tokens,
-configuration, history, and skills, so it must be treated as a secret.
+`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. Profile V4 uses
+`[agent] state = "shared"` or `"isolated"`. The latter selects temporary
+per-container state instead of cross-project persistent state. Shared state can
+contain authentication tokens, configuration, history, and skills, so it must
+be treated as a secret. Profile V3 and its former `[codex]` table are rejected;
+there is no compatibility or automatic migration layer during development.
 
 Workspace selection is intentionally not part of the Profile. The Codex command
 mounts the current directory at `/workspace` by default. Select another project
@@ -197,7 +201,7 @@ cargo run -- codex --workspace /path/to/project
 Check the example profile through the CLI:
 
 ```sh
-cargo run -- profile check examples/codex.toml
+cargo run -- profile check examples/profile.toml
 ```
 
 The Host Bridge can also be started manually for diagnostics with an unused
@@ -230,6 +234,7 @@ src/
 ├── lib.rs                  Library entry point
 ├── main.rs                 Terminal application entry point
 ├── error.rs                Centralized error messages
+├── agent/                  Agent-specific state and command adapters
 ├── cli/                    clap commands, including the natural Codex entry point
 ├── host_bridge/            Authenticated host shell MCP bridge
 ├── preflight/              Host path resolution and checks

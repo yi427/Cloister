@@ -16,7 +16,7 @@ use tempfile::NamedTempFile;
 use crate::{
     error::message,
     profile::{
-        AgentState, Architecture, CodexProfile, CpuCount, GuestProfile, ImageProfile, MemorySize,
+        AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, ImageProfile, MemorySize,
         NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION, Profile, validate_profile,
     },
     runtime::{
@@ -41,7 +41,7 @@ const DEFAULT_USER: &str = "cloister";
 
 #[derive(Debug, Args)]
 pub(super) struct InitArgs {
-    /// Path where the new Profile V3 TOML file will be created.
+    /// Path where the new Profile V4 TOML file will be created.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -124,7 +124,7 @@ fn prompt_profile(
     let persistent_state = prompt_yes_no(
         input,
         output,
-        "Persist Codex login and state across projects?",
+        "Persist agent credentials, settings, and session history across projects?",
         true,
     )?;
     let profile = Profile {
@@ -144,7 +144,7 @@ fn prompt_profile(
         network: NetworkProfile {
             mode: NetworkMode::Default,
         },
-        codex: CodexProfile {
+        agent: AgentProfile {
             state: if persistent_state {
                 AgentState::Shared
             } else {
@@ -263,12 +263,12 @@ fn print_summary(
         profile.guest.memory
     )?;
     writeln!(output, "  Network: default (outbound internet enabled)")?;
-    match profile.codex.state {
+    match profile.agent.state {
         AgentState::Shared => writeln!(
             output,
-            "  Codex state: shared (may contain credentials and history)"
+            "  Agent state: shared (separate per agent; may contain credentials and history)"
         )?,
-        AgentState::Isolated => writeln!(output, "  Codex state: isolated (ephemeral)")?,
+        AgentState::Isolated => writeln!(output, "  Agent state: isolated (ephemeral)")?,
     }
     Ok(())
 }

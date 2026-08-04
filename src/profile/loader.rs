@@ -67,13 +67,15 @@ impl fmt::Display for LoadProfileError {
                 message::PROFILE_READ_FAILED,
                 path.display()
             ),
-            Self::Parse { path, source } => write!(
-                formatter,
-                "{} '{}': {}",
-                message::PROFILE_PARSE_FAILED,
-                path.display(),
-                source.diagnostic()
-            ),
+            Self::Parse { path, source } => {
+                write!(
+                    formatter,
+                    "{} '{}': ",
+                    message::PROFILE_PARSE_FAILED,
+                    path.display()
+                )?;
+                source.fmt_diagnostic(formatter)
+            }
             Self::Validation { path, source } => {
                 let diagnostic = source.to_string();
                 write!(

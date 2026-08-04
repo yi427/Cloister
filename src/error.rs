@@ -17,8 +17,7 @@ pub(crate) mod message {
     pub const VALUE_MUST_NOT_BE_BLANK: &str = "must not be blank";
     pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "bind mount paths must not contain ','";
     pub const RUNTIME_START_FAILED: &str = "failed to start runtime";
-    pub const SHARED_CODEX_STATE_MISSING: &str =
-        "shared Codex state requires a Cloister-managed host directory";
+    pub const SHARED_AGENT_STATE_MISSING: &str = "state requires a Cloister-managed host directory";
     pub const CURRENT_DIRECTORY_FAILED: &str = "failed to resolve the current directory";
     pub const HOME_DIRECTORY_MISSING: &str =
         "HOME is not set; cannot locate Cloister configuration or state";

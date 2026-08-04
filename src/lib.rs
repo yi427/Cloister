@@ -2,6 +2,7 @@
 
 mod error;
 
+pub mod agent;
 pub mod cli;
 pub mod host_bridge;
 pub mod preflight;

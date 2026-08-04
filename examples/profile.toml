@@ -1,6 +1,6 @@
-# Profile V3 example for: cloister codex --profile examples/codex.toml
-schema_version = 3
-name = "codex-default"
+# Profile V4 example for Cloister agent commands.
+schema_version = 4
+name = "default"
 
 [image]
 reference = "cloister:dev"
@@ -16,5 +16,5 @@ timezone = "America/New_York"
 [network]
 mode = "default"
 
-[codex]
+[agent]
 state = "shared"
