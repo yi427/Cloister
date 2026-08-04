@@ -12,7 +12,7 @@ use axum::{
 use rmcp::{
     Json, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{ServerCapabilities, ServerInfo},
+    model::{MetaObject, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::{
         StreamableHttpServerConfig, StreamableHttpService,
@@ -27,6 +27,7 @@ use crate::error::message;
 use super::{BridgeToken, tools};
 
 const ALLOWED_MCP_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "host.container.internal"];
+const REQUIRES_USER_INTERACTION: &str = "anthropic/requiresUserInteraction";
 
 #[derive(Clone, Debug)]
 struct HostBridgeService {
@@ -35,9 +36,19 @@ struct HostBridgeService {
 
 impl HostBridgeService {
     fn new() -> Self {
-        Self {
-            tool_router: Self::tool_router(),
-        }
+        let mut tool_router = Self::tool_router();
+        let host_exec = tool_router
+            .map
+            .get_mut("host.exec")
+            .expect("the host.exec route should be generated");
+        let mut metadata = MetaObject::new();
+        metadata.0.insert(
+            REQUIRES_USER_INTERACTION.to_owned(),
+            serde_json::Value::Bool(true),
+        );
+        host_exec.attr.meta = Some(metadata);
+
+        Self { tool_router }
     }
 }
 
@@ -167,18 +178,24 @@ impl Error for HostBridgeServerError {
 
 #[cfg(test)]
 mod tests {
-    use super::HostBridgeService;
+    use super::{HostBridgeService, REQUIRES_USER_INTERACTION};
 
     #[test]
     fn exposes_only_the_host_exec_tool() {
         let service = HostBridgeService::new();
-        let names = service
-            .tool_router
-            .list_all()
-            .into_iter()
-            .map(|tool| tool.name.into_owned())
+        let tools = service.tool_router.list_all();
+        let names = tools
+            .iter()
+            .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>();
 
         assert_eq!(names, ["host.exec"]);
+        assert_eq!(
+            tools[0]
+                .meta
+                .as_ref()
+                .and_then(|metadata| metadata.0.get(REQUIRES_USER_INTERACTION)),
+            Some(&serde_json::Value::Bool(true))
+        );
     }
 }

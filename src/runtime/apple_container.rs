@@ -287,8 +287,11 @@ impl ContainerRunCommandBuilder {
 
     fn finish(self) -> CommandSpec {
         let mut arguments =
-            Vec::with_capacity(self.options.len() + self.container_command.len() + 1);
+            Vec::with_capacity(self.options.len() + self.container_command.len() + 2);
         arguments.extend(self.options);
+        // Apple container otherwise treats agent flags such as `--version` as
+        // global runtime options even after the image reference.
+        arguments.push(OsString::from("--"));
         arguments.push(self.image);
         arguments.extend(self.container_command);
 

@@ -2,6 +2,7 @@
 
 mod agent;
 mod check;
+mod claude;
 mod codex;
 mod config;
 mod host;
@@ -15,6 +16,7 @@ use clap::{Parser, Subcommand};
 use crate::error::message;
 
 use self::check::CheckArgs;
+use self::claude::ClaudeArgs;
 use self::codex::CodexArgs;
 use self::host::HostArgs;
 use self::init::InitArgs;
@@ -37,6 +39,8 @@ struct Cli {
 enum Command {
     /// Check whether Cloister is ready to launch an agent.
     Check(CheckArgs),
+    /// Run Claude Code in the selected project.
+    Claude(ClaudeArgs),
     /// Run Codex in the selected project.
     Codex(CodexArgs),
     /// Serve or exercise the host shell MCP bridge.
@@ -62,6 +66,7 @@ impl Command {
     async fn execute(self) -> Result<ExitCode, CliError> {
         match self {
             Self::Check(arguments) => Ok(arguments.execute().await),
+            Self::Claude(arguments) => arguments.execute().await.map_err(CliError::Agent),
             Self::Codex(arguments) => arguments.execute().await.map_err(CliError::Agent),
             Self::Host(arguments) => arguments
                 .execute()

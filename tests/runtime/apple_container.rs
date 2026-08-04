@@ -5,7 +5,7 @@ use std::{
 };
 
 use cloister::{
-    agent::CodexAgent,
+    agent::{ClaudeAgent, CodexAgent},
     preflight::resolve_launch,
     profile::{AgentState, load_profile},
     runtime::{
@@ -113,7 +113,11 @@ fn translates_every_supported_codex_setting() {
     assert!(arguments.iter().any(|argument| argument == "--read-only"));
     assert!(!arguments.iter().any(|argument| argument == "--ssh"));
     assert_eq!(argument_after(arguments, "--tmpfs"), "/tmp");
-    assert!(arguments.ends_with(&[OsString::from("cloister:dev"), OsString::from("codex"),]));
+    assert!(arguments.ends_with(&[
+        OsString::from("--"),
+        OsString::from("cloister:dev"),
+        OsString::from("codex"),
+    ]));
 
     let environments = arguments
         .windows(2)
@@ -176,6 +180,7 @@ fn appends_codex_arguments_without_shell_parsing() {
         .expect("Codex launch should produce plan");
 
     assert!(plan.command().arguments().ends_with(&[
+        OsString::from("--"),
         OsString::from("cloister:dev"),
         OsString::from("codex"),
         OsString::from("--config"),
@@ -280,4 +285,60 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     assert!(display.contains("[REDACTED]"));
     assert!(!display.contains(token));
     assert!(!debug.contains(token));
+}
+
+#[test]
+fn mounts_shared_claude_state_and_sets_claude_config_dir() {
+    let path = fixture("valid/default.toml");
+    let mut profile = load_profile(&path).expect("default profile should load");
+    profile.agent.state = AgentState::Shared;
+    let resolved =
+        resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
+    let state = fixture("valid");
+
+    let plan = plan_agent_container(&resolved, &ClaudeAgent, Some(&state), None, &[])
+        .expect("shared Claude state should produce a plan");
+    let arguments = plan.command().arguments();
+    let mount = plan.agent_state().expect("Claude state should be mounted");
+    let expected_mount = OsString::from(format!(
+        "type=bind,source={},target=/cloister/agents/claude",
+        state.display()
+    ));
+
+    assert_eq!(plan.agent_name(), "Claude");
+    assert_eq!(mount.host(), state);
+    assert_eq!(mount.guest(), Path::new("/cloister/agents/claude"));
+    assert!(arguments.windows(2).any(|pair| {
+        pair[0] == "--env" && pair[1] == "CLAUDE_CONFIG_DIR=/cloister/agents/claude"
+    }));
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| { pair[0] == "--mount" && pair[1] == expected_mount })
+    );
+    assert!(arguments.ends_with(&[
+        OsString::from("--"),
+        OsString::from("cloister:dev"),
+        OsString::from("claude"),
+    ]));
+}
+
+#[test]
+fn appends_claude_arguments_without_shell_parsing() {
+    let path = fixture("valid/default.toml");
+    let profile = load_profile(&path).expect("default profile should load");
+    let resolved =
+        resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
+    let arguments = [OsString::from("--model"), OsString::from("sonnet")];
+
+    let plan = plan_agent_container(&resolved, &ClaudeAgent, None, None, &arguments)
+        .expect("Claude launch should produce plan");
+
+    assert!(plan.command().arguments().ends_with(&[
+        OsString::from("--"),
+        OsString::from("cloister:dev"),
+        OsString::from("claude"),
+        OsString::from("--model"),
+        OsString::from("sonnet"),
+    ]));
 }

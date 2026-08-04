@@ -11,16 +11,17 @@ wrapper. The common action should instead be running an agent in the current
 project.
 
 Agent login, configuration, sessions, and skills also need to survive an
-ephemeral container. Mounting the host's existing `~/.codex` would expose state
-that Cloister did not create or select.
+ephemeral container. Mounting the host's existing `~/.codex` or `~/.claude`
+would expose state that Cloister did not create or select.
 
 ## Decision
 
-The high-level Codex workflow is:
+The high-level supported-agent workflows are:
 
 ```text
 cd <project>
 cloister codex
+cloister claude
 ```
 
 Cloister does not expose a general-purpose `run` command. Generic Apple
@@ -29,15 +30,19 @@ agent-specific commands.
 
 It uses the current directory as `/workspace` unless `--workspace` selects
 another directory, reuses the configured OCI image, removes the container after
-exit, and persists shared Codex state in a Cloister-managed directory:
+exit, and persists shared state in a separate Cloister-managed directory for
+each agent:
 
 ```text
 ~/.local/share/cloister/agents/codex
+~/.local/share/cloister/agents/claude
 ```
 
-That directory is mounted at `/cloister/agents/codex`, exposed to Codex through
-`CODEX_HOME`, and restricted to owner-only host permissions. Cloister rejects a
-symbolic link at the state-directory boundary.
+The Codex directory is mounted at `/cloister/agents/codex` and exposed through
+`CODEX_HOME`. The Claude directory is mounted at `/cloister/agents/claude` and
+exposed through `CLAUDE_CONFIG_DIR`. Each selected directory is restricted to
+owner-only host permissions, and Cloister rejects a symbolic link at the
+state-directory boundary.
 
 Profile selection uses this order:
 
@@ -56,9 +61,12 @@ The development version deliberately rejects Profile V3 and its former
 `[codex]` table without aliases, migration, or inferred defaults.
 Workspace selection belongs to each CLI invocation, not the Profile.
 
-The natural entry point also enables the authenticated `cloister_host` MCP
-bridge by default. Its configuration is injected for one Codex process and does
-not mutate persistent `config.toml`. `--no-host-bridge` provides an explicit
+The natural entry points also enable the authenticated `cloister_host` MCP
+bridge by default. Codex receives transient `--config` values; Claude receives
+a transient inline `--mcp-config` with an environment-backed authorization
+header. Cloister does not add `--strict-mcp-config`, so the injected bridge does
+not suppress the user's other Claude MCP sources. Neither path mutates
+persistent agent configuration. `--no-host-bridge` provides an explicit
 minimum-capability invocation.
 
 `--dry-run` resolves and displays the selected workspace and state mount paths
@@ -69,7 +77,7 @@ without creating or changing the agent state directory.
 Shared state is shared across projects and may contain renewable authentication
 tokens, configuration, history, and skills. It is a secret and it weakens
 project-to-project state isolation by design. Cloister does not mount the host's
-pre-existing `~/.codex`.
+pre-existing `~/.codex` or `~/.claude`.
 
 The workspace remains a live read-write bind mount by default. The agent can
 modify or delete files in it.

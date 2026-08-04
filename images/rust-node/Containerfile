@@ -49,7 +49,7 @@ RUN groupadd --gid 10001 cloister \
         --shell /bin/bash \
         --uid 10001 \
         cloister \
-    && mkdir -p /workspace /cloister/agents/codex \
+    && mkdir -p /workspace /cloister/agents/codex /cloister/agents/claude \
     && chown -R cloister:cloister /workspace /cloister
 
 COPY entrypoint.sh /usr/local/bin/cloister-entrypoint
@@ -60,6 +60,7 @@ RUN chmod 0755 /usr/local/bin/cloister-entrypoint \
 ENV HOME=/tmp/cloister/home
 ENV CARGO_HOME=/tmp/cloister/cargo
 ENV CODEX_HOME=/tmp/cloister/codex
+ENV CLAUDE_CONFIG_DIR=/tmp/cloister/claude
 ENV DISABLE_AUTOUPDATER=1
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8

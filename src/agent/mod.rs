@@ -1,5 +1,6 @@
 //! Agent-specific launch adapters consumed by the shared CLI and runtime.
 
+mod claude;
 mod codex;
 
 use std::{
@@ -7,6 +8,7 @@ use std::{
     path::Path,
 };
 
+pub use claude::ClaudeAgent;
 pub use codex::CodexAgent;
 
 /// Public Host MCP connection details that may be rendered in agent arguments.

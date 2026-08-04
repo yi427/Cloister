@@ -46,7 +46,7 @@ pub(super) struct AgentArgs {
     #[arg(long, value_name = "DIRECTORY", value_hint = ValueHint::DirPath)]
     workspace: Option<PathBuf>,
 
-    /// Print the runtime plan without starting Codex.
+    /// Print the runtime plan without starting the agent.
     #[arg(long)]
     dry_run: bool,
 
@@ -58,7 +58,7 @@ pub(super) struct AgentArgs {
     #[arg(long, default_value = "17834", value_name = "PORT")]
     host_bridge_port: NonZeroU16,
 
-    /// Arguments passed directly to Codex.
+    /// Arguments passed directly to the agent.
     #[arg(last = true, value_name = "ARGUMENT")]
     arguments: Vec<OsString>,
 }

@@ -5,10 +5,11 @@ coding agents. It will use Apple's `container` CLI to run Codex, Claude Code,
 and development toolchains inside lightweight Linux virtual machines on Apple
 silicon.
 
-The project now has a first natural Codex workflow. The Rust binary can launch
-Codex in the current project with persistent Cloister-managed state, load
-profiles, produce inspectable runtime plans, run commands through Apple
-`container`, and serve an authenticated host-command bridge.
+The project now has natural Codex and Claude Code workflows. The Rust binary
+can launch either agent in the current project with separate persistent
+Cloister-managed state, load profiles, produce inspectable runtime plans, run
+commands through Apple `container`, and serve an authenticated host-command
+bridge.
 
 ## MVP boundary
 
@@ -19,7 +20,8 @@ The first useful version will:
 - apply CPU, memory, locale, timezone, and guest-user settings;
 - expose the selected project through an explicit live bind mount;
 - keep Cloister-managed agent state separate from host credentials;
-- expose an authenticated host shell escape hatch to Codex by default;
+- expose an authenticated host shell escape hatch to supported agents by
+  default;
 - make network and writable-mount choices visible before launch;
 - stop and remove environments without deleting the host project.
 
@@ -60,36 +62,44 @@ Claude Code installed. The tool versions are pinned in
 uses a non-root `cloister` user and keeps its temporary home and CLI state under
 the guest `/tmp` tmpfs. It does not contain or mount host credentials.
 
-Run Codex in the current project:
+Run Codex or Claude Code in the current project:
 
 ```sh
 cd /path/to/project
 cloister codex
+cloister claude
 ```
 
 When running from this repository during development, use:
 
 ```sh
 cargo run -- codex
+cargo run -- claude
 ```
 
-The command maps the current directory to `/workspace`, reuses
-`cloister:dev`, and keeps Codex state in
-`~/.local/share/cloister/agents/codex`. Cloister creates that directory with
-owner-only permissions and mounts it as `CODEX_HOME`; it never mounts the
-host's existing `~/.codex`.
+Both commands map the current directory to `/workspace` and reuse
+`cloister:dev`. Shared Codex state lives under
+`~/.local/share/cloister/agents/codex` and is mounted as `CODEX_HOME`; shared
+Claude state lives under `~/.local/share/cloister/agents/claude` and is mounted
+as `CLAUDE_CONFIG_DIR`. Cloister creates only the selected agent's directory
+with owner-only permissions. It never mounts the host's existing `~/.codex` or
+`~/.claude`.
 
-The command also starts an authenticated MCP bridge on macOS loopback and
-injects it into Codex as `cloister_host`. Its only tool, `host.exec`, runs an
-arbitrary command as the macOS user running Cloister. Codex is configured to
-prompt before each call. The bearer token exists only for the process
-lifecycle, is forwarded by environment-variable name, and is never printed,
-persisted in `config.toml`, or mounted as a file.
+Each command also starts an authenticated MCP bridge on macOS loopback and
+injects it into the selected agent as `cloister_host`. Its only tool,
+`host.exec`, runs an arbitrary command as the macOS user running Cloister.
+Codex receives transient `--config` values that require the server, allow only
+`host.exec`, and request per-call approval. Claude receives a transient inline
+`--mcp-config`; the server is loaded eagerly, and `host.exec` carries Claude's
+`anthropic/requiresUserInteraction` metadata so the pinned Claude Code build
+requires a human prompt for every call. The bearer token exists only for the
+process lifecycle, is forwarded by environment-variable name, and is never
+printed, persisted in an agent configuration file, or mounted as a file.
 
-The prompt is a Codex MCP interaction policy, not a guest-process security
-boundary. The token is available to the Codex process and may be inherited by
+The prompt is an agent interaction policy, not a guest-process security
+boundary. The token is available to the agent process and may be inherited by
 processes it starts. A guest process that obtains the token can call the bridge
-directly without a Codex approval prompt. Enabling the bridge by default
+directly without an agent approval prompt. Enabling the bridge by default
 therefore deliberately grants the guest a path to the macOS user's authority.
 
 Apple `container` must have a localhost DNS domain that forwards the guest name
@@ -103,14 +113,17 @@ sudo container system dns create \
 
 Confirm it with `container system dns list`. Apple documents that creating a
 localhost domain disables Private Relay and that its packet-filter rule is
-removed on restart. The MCP server is marked required, so Codex fails visibly
-instead of silently starting without `host.exec` when the bridge is not
-reachable.
+removed on restart. Codex marks the MCP server as required. Claude's
+`alwaysLoad` setting blocks initial tool loading while it attempts the bridge
+connection, but Claude Code does not expose the same fail-closed `required`
+setting; a connection failure is reported by Claude rather than represented as
+an equivalent Cloister guarantee.
 
 Disable this high-privilege capability for one invocation with:
 
 ```sh
 cargo run -- codex --no-host-bridge
+cargo run -- claude --no-host-bridge
 ```
 
 If port `17834` is already in use, select another loopback port with
@@ -120,12 +133,14 @@ Inspect this high-level launch without starting a container:
 
 ```sh
 cargo run -- codex --dry-run
+cargo run -- claude --dry-run
 ```
 
-Pass arguments to Codex after `--`:
+Pass arguments to the selected agent after `--`:
 
 ```sh
 cargo run -- codex -- --version
+cargo run -- claude -- --version
 ```
 
 Profile selection is explicit `--profile`, otherwise
@@ -160,7 +175,7 @@ Select another new Profile path with:
 cargo run -- init --profile /path/to/profile.toml
 ```
 
-Check that Cloister is ready before launching Codex:
+Check that Cloister is ready before launching an agent:
 
 ```sh
 cargo run -- check
@@ -190,12 +205,13 @@ contain authentication tokens, configuration, history, and skills, so it must
 be treated as a secret. Profile V3 and its former `[codex]` table are rejected;
 there is no compatibility or automatic migration layer during development.
 
-Workspace selection is intentionally not part of the Profile. The Codex command
-mounts the current directory at `/workspace` by default. Select another project
-for one invocation with:
+Workspace selection is intentionally not part of the Profile. Both agent
+commands mount the current directory at `/workspace` by default. Select another
+project for one invocation with:
 
 ```sh
 cargo run -- codex --workspace /path/to/project
+cargo run -- claude --workspace /path/to/project
 ```
 
 Check the example profile through the CLI:
@@ -235,7 +251,7 @@ src/
 ├── main.rs                 Terminal application entry point
 ├── error.rs                Centralized error messages
 ├── agent/                  Agent-specific state and command adapters
-├── cli/                    clap commands, including the natural Codex entry point
+├── cli/                    clap commands and natural agent entry points
 ├── host_bridge/            Authenticated host shell MCP bridge
 ├── preflight/              Host path resolution and checks
 ├── runtime/                Inspectable plans and container arguments

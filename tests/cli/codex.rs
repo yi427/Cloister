@@ -34,7 +34,7 @@ fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[
 }
 
 #[test]
-fn keeps_the_codex_specific_command_help() {
+fn keeps_the_shared_agent_command_help() {
     let directory = tempdir().expect("temporary directory should exist");
 
     let output = run(
@@ -48,8 +48,8 @@ fn keeps_the_codex_specific_command_help() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("Path to a Profile V4 TOML file"));
-    assert!(stdout.contains("Print the runtime plan without starting Codex"));
-    assert!(stdout.contains("Arguments passed directly to Codex"));
+    assert!(stdout.contains("Print the runtime plan without starting the agent"));
+    assert!(stdout.contains("Arguments passed directly to the agent"));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
 
     assert_eq!(output.status.code(), Some(9));
     assert!(output.stderr.is_empty());
-    assert!(stdout.ends_with("cloister:dev\ncodex\n--version\n"));
+    assert!(stdout.ends_with("--\ncloister:dev\ncodex\n--version\n"));
     assert_eq!(
         fs::metadata(home.join(".local/share/cloister/agents/codex"))
             .expect("state metadata should be available")

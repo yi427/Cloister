@@ -1,4 +1,5 @@
 mod check;
+mod claude;
 mod codex;
 mod host;
 mod init;

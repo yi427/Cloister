@@ -1,6 +1,6 @@
 # ADR 0002: Minimal host command bridge
 
-- Status: Accepted for MVP, amended 2026-08-01
+- Status: Accepted for MVP, amended 2026-08-05
 - Date: 2026-07-29
 
 ## Context
@@ -23,19 +23,22 @@ bridge and returns stdout, stderr, the exit status, and execution duration.
 The bridge listens only on loopback. Manual `cloister host serve` usage keeps
 the owner-only bearer-token file interface.
 
-`cloister codex` enables the bridge by default as a core product capability.
-For each invocation it:
+`cloister codex` and `cloister claude` enable the bridge by default as a core
+product capability. For each invocation Cloister:
 
 1. generates a fresh bearer token in memory;
 2. starts the bridge on `127.0.0.1:17834`;
 3. asks Apple `container` to inherit the token by environment-variable name,
    without placing the value in command arguments;
-4. injects a transient Streamable HTTP MCP configuration into Codex with
+4. injects a transient Streamable HTTP MCP configuration: Codex receives
    `required = true`, an allowlist containing only `host.exec`, and per-call
-   prompt approval; and
-5. stops the bridge and discards the token when Codex exits.
+   prompt approval; Claude receives an inline `--mcp-config` with
+   `alwaysLoad = true` and an environment-backed authorization header;
+5. advertises `host.exec` with Claude's
+   `anthropic/requiresUserInteraction = true` metadata; and
+6. stops the bridge and discards the token when the agent exits.
 
-The token is not written into persistent Codex configuration or mounted into
+The token is not written into persistent agent configuration or mounted into
 the guest as a file. `--no-host-bridge` disables the capability for one
 invocation, and `--host-bridge-port` resolves a local port conflict.
 
@@ -55,12 +58,13 @@ commands.
 
 The bridge is enabled by default by product decision and must therefore be
 described prominently and rendered in the inspectable runtime plan. Codex is
-asked to prompt before each MCP call, but that prompt is not an isolation
-boundary. Possession of the token is the actual bridge authorization boundary.
-The token is available to the Codex process and can be inherited by guest
-subprocesses; a process that obtains it can call the bridge without a Codex
-approval prompt. Default bridge enablement therefore deliberately grants the
-guest a path to the macOS user's authority.
+configured to prompt before each MCP call. Claude's pinned version recognizes
+the tool metadata and requires a human prompt on every call. Neither prompt is
+an isolation boundary. Possession of the token is the actual bridge
+authorization boundary. The token is available to the agent process and can be
+inherited by guest subprocesses; a process that obtains it can call the bridge
+without an agent approval prompt. Default bridge enablement therefore
+deliberately grants the guest a path to the macOS user's authority.
 
 Stronger command policy can be added only when real usage shows which
 boundaries are needed.
