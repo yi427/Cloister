@@ -2,7 +2,7 @@ schema_version = 4
 name = "unsupported-schema"
 
 [image]
-reference = "cloister/rust-node:dev"
+reference = "cloister:dev"
 architecture = "arm64"
 
 [guest]

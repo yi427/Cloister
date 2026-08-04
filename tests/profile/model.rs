@@ -11,7 +11,7 @@ fn constructs_profile_v3_through_the_public_api() {
         schema_version: PROFILE_SCHEMA_VERSION,
         name: "rust-default".to_owned(),
         image: ImageProfile {
-            reference: "cloister/rust-node:dev".to_owned(),
+            reference: "cloister:dev".to_owned(),
             architecture: Architecture::Arm64,
         },
         guest: GuestProfile {

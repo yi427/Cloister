@@ -64,7 +64,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
     assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
     assert!(stdout.contains("default_tools_approval_mode=\\\"prompt\\\""));
-    assert!(stdout.contains("\"cloister/rust-node:dev\""));
+    assert!(stdout.contains("\"cloister:dev\""));
     assert!(!state.exists(), "dry-run must not create agent state");
 }
 
@@ -149,7 +149,7 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
 
     assert_eq!(output.status.code(), Some(9));
     assert!(output.stderr.is_empty());
-    assert!(stdout.ends_with("cloister/rust-node:dev\ncodex\n--version\n"));
+    assert!(stdout.ends_with("cloister:dev\ncodex\n--version\n"));
     assert_eq!(
         fs::metadata(home.join(".local/share/cloister/agents/codex"))
             .expect("state metadata should be available")

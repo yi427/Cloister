@@ -1,6 +1,6 @@
 schema_version = 3
 name = "invalid-memory"
-image = { reference = "cloister/rust-node:dev", architecture = "arm64" }
+image = { reference = "cloister:dev", architecture = "arm64" }
 guest = { cpus = 4, memory = "hello", user = "cloister", locale = "en_US.UTF-8", timezone = "America/New_York" }
 network = { mode = "default" }
 codex = { state = "isolated" }

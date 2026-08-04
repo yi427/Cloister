@@ -45,7 +45,16 @@ Build the current local development image:
 make image
 ```
 
-This produces `cloister/rust-node:dev` with Node.js, Rust, Git, Codex CLI, and
+The `main` branch also publishes a Linux ARM64 development image to GitHub
+Container Registry as `ghcr.io/yi427/cloister:main` and an immutable
+`sha-<commit>` tag. A pushed `vX.Y.Z` Git tag publishes `X.Y.Z` and `X.Y` tags;
+the workflow deliberately does not publish a floating `latest` tag. GitHub
+packages are private on first publication, so a maintainer must explicitly make
+the package public before unauthenticated users can pull it.
+The complete tag and release policy is documented in
+[`docs/releasing.md`](docs/releasing.md).
+
+This produces `cloister:dev` with Node.js, Rust, Git, Codex CLI, and
 Claude Code installed. The tool versions are pinned in
 [`images/rust-node/Containerfile`](images/rust-node/Containerfile). The image
 uses a non-root `cloister` user and keeps its temporary home and CLI state under
@@ -65,7 +74,7 @@ cargo run -- codex
 ```
 
 The command maps the current directory to `/workspace`, reuses
-`cloister/rust-node:dev`, and keeps Codex state in
+`cloister:dev`, and keeps Codex state in
 `~/.local/share/cloister/agents/codex`. Cloister creates that directory with
 owner-only permissions and mounts it as `CODEX_HOME`; it never mounts the
 host's existing `~/.codex`.

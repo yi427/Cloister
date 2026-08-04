@@ -1,4 +1,4 @@
-IMAGE_TAG ?= cloister/rust-node:dev
+IMAGE_TAG ?= cloister:dev
 IMAGE_CONTEXT := images/rust-node
 
 .PHONY: format format-check verify image image-check install-hooks

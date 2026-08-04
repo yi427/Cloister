@@ -3,7 +3,7 @@ schema_version = 3
 name = "codex-default"
 
 [image]
-reference = "cloister/rust-node:dev"
+reference = "cloister:dev"
 architecture = "arm64"
 
 [guest]

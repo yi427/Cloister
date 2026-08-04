@@ -12,7 +12,7 @@ case "$1:$2:$3" in
   system:status:--format)
     printf '%s\n' '{"apiServerVersion":"container-apiserver version 1.2.0","status":"running"}'
     ;;
-  image:inspect:cloister/rust-node:dev)
+  image:inspect:cloister:dev)
     printf '%s\n' '[{"variants":[{"platform":{"architecture":"arm64","os":"linux"}}]}]'
     ;;
   system:dns:list)
@@ -41,7 +41,7 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("[PASS] Profile: 'codex-default'"));
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
-    assert!(stdout.contains("[PASS] Image: 'cloister/rust-node:dev' (linux/arm64)"));
+    assert!(stdout.contains("[PASS] Image: 'cloister:dev' (linux/arm64)"));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
     assert!(stdout.ends_with("All checks passed.\n"));
     assert!(

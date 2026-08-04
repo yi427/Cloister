@@ -66,10 +66,7 @@ fn translates_every_supported_codex_setting() {
     assert!(arguments.iter().any(|argument| argument == "--read-only"));
     assert!(!arguments.iter().any(|argument| argument == "--ssh"));
     assert_eq!(argument_after(arguments, "--tmpfs"), "/tmp");
-    assert!(arguments.ends_with(&[
-        OsString::from("cloister/rust-node:dev"),
-        OsString::from("codex"),
-    ]));
+    assert!(arguments.ends_with(&[OsString::from("cloister:dev"), OsString::from("codex"),]));
 
     let environments = arguments
         .windows(2)
@@ -132,7 +129,7 @@ fn appends_codex_arguments_without_shell_parsing() {
         .expect("Codex launch should produce plan");
 
     assert!(plan.command().arguments().ends_with(&[
-        OsString::from("cloister/rust-node:dev"),
+        OsString::from("cloister:dev"),
         OsString::from("codex"),
         OsString::from("--config"),
         OsString::from("model_reasoning_effort=high"),
