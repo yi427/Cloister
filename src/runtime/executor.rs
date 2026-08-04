@@ -1,6 +1,11 @@
 //! Direct execution of an inspectable runtime command.
 
-use std::{error::Error, ffi::OsString, fmt, io, process::ExitStatus};
+use std::{
+    error::Error,
+    ffi::OsString,
+    fmt, io,
+    process::{ExitStatus, Output},
+};
 
 use tokio::process::Command;
 
@@ -25,6 +30,23 @@ pub async fn execute(command: &CommandSpec) -> Result<ExitStatus, RuntimeExecuti
         })
 }
 
+/// Executes a runtime query and captures its output without shell parsing.
+pub async fn execute_output(command: &CommandSpec) -> Result<Output, RuntimeExecutionError> {
+    let mut process = Command::new(command.program());
+    process.args(command.arguments());
+    for variable in command.secret_environment() {
+        process.env(&variable.name, variable.value());
+    }
+
+    process
+        .output()
+        .await
+        .map_err(|source| RuntimeExecutionError::Start {
+            program: command.program().to_owned(),
+            source,
+        })
+}
+
 /// Failure to start the planned runtime process.
 #[derive(Debug)]
 pub enum RuntimeExecutionError {
@@ -32,6 +54,15 @@ pub enum RuntimeExecutionError {
         program: OsString,
         source: io::Error,
     },
+}
+
+impl RuntimeExecutionError {
+    /// Returns true when the runtime executable could not be found on PATH.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::Start { source, .. } => source.kind() == io::ErrorKind::NotFound,
+        }
+    }
 }
 
 impl fmt::Display for RuntimeExecutionError {

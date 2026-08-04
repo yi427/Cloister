@@ -15,8 +15,8 @@ version boundary.
   Cloister release, but its upstream version does not become the Cloister
   version.
 
-The planned `cloister init` command will derive its default release image from
-the compiled CLI version:
+The `cloister init` command derives its default release image from the compiled
+CLI version:
 
 ```text
 ghcr.io/yi427/cloister:<CARGO_PKG_VERSION>
@@ -59,7 +59,8 @@ pullable. Public package visibility cannot later be changed back to private.
 7. Create and push an annotated `vX.Y.Z` Git tag.
 8. Confirm that GitHub Actions published `X.Y.Z`, `X.Y`, and the immutable
    `sha-<full-commit>` image tags, then verify the exact image through Apple
-   `container` before changing defaults used by `init`.
+   `container` before distributing that CLI release. Its `init` default already
+   points at the matching exact version.
 
 Example for version `0.1.0`:
 

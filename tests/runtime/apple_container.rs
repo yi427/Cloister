@@ -7,7 +7,11 @@ use std::{
 use cloister::{
     preflight::resolve_launch,
     profile::{AgentState, load_profile},
-    runtime::{HostBridgeLaunch, NetworkExposure, plan_codex_container},
+    runtime::{
+        HOST_BRIDGE_GUEST_NAME, HOST_BRIDGE_LOCALHOST_ADDRESS, HostBridgeLaunch, NetworkExposure,
+        dns_create_command, dns_list_command, image_inspect_command, image_pull_command,
+        plan_codex_container, system_start_command, system_status_command,
+    },
 };
 use tempfile::tempdir;
 
@@ -34,6 +38,46 @@ fn argument_after<'a>(arguments: &'a [OsString], option: &str) -> &'a OsStr {
     arguments
         .get(position + 1)
         .expect("option should have a value")
+}
+
+#[test]
+fn constructs_explicit_setup_and_probe_commands() {
+    let status = system_status_command();
+    assert_eq!(status.program(), OsStr::new("container"));
+    assert_eq!(status.arguments(), ["system", "status", "--format", "json"]);
+
+    let start = system_start_command();
+    assert_eq!(start.program(), OsStr::new("container"));
+    assert_eq!(start.arguments(), ["system", "start"]);
+
+    let image = "ghcr.io/yi427/cloister:0.1.0";
+    assert_eq!(
+        image_inspect_command(image).arguments(),
+        ["image", "inspect", image]
+    );
+    assert_eq!(
+        image_pull_command(image).arguments(),
+        ["image", "pull", "--arch", "arm64", image]
+    );
+    assert_eq!(
+        dns_list_command().arguments(),
+        ["system", "dns", "list", "--format", "json"]
+    );
+
+    let dns = dns_create_command();
+    assert_eq!(dns.program(), OsStr::new("sudo"));
+    assert_eq!(
+        dns.arguments(),
+        [
+            "container",
+            "system",
+            "dns",
+            "create",
+            HOST_BRIDGE_GUEST_NAME,
+            "--localhost",
+            HOST_BRIDGE_LOCALHOST_ADDRESS,
+        ]
+    );
 }
 
 #[test]

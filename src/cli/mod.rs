@@ -4,6 +4,7 @@ mod check;
 mod codex;
 mod config;
 mod host;
+mod init;
 mod profile;
 
 use std::{error::Error, fmt, process::ExitCode};
@@ -15,6 +16,7 @@ use crate::error::message;
 use self::check::CheckArgs;
 use self::codex::CodexArgs;
 use self::host::HostArgs;
+use self::init::InitArgs;
 use self::profile::ProfileArgs;
 
 #[derive(Debug, Parser)]
@@ -38,6 +40,8 @@ enum Command {
     Codex(CodexArgs),
     /// Serve or exercise the host shell MCP bridge.
     Host(HostArgs),
+    /// Interactively create a Profile and prepare Apple container.
+    Init(InitArgs),
     /// Inspect and manage environment profiles.
     Profile(ProfileArgs),
 }
@@ -63,6 +67,7 @@ impl Command {
                 .await
                 .map(|()| ExitCode::SUCCESS)
                 .map_err(CliError::Host),
+            Self::Init(arguments) => arguments.execute().await.map_err(CliError::Init),
             Self::Profile(arguments) => arguments
                 .execute()
                 .map(|()| ExitCode::SUCCESS)
@@ -75,6 +80,7 @@ impl Command {
 enum CliError {
     Codex(codex::CodexCommandError),
     Host(host::HostCommandError),
+    Init(init::InitCommandError),
     Profile(profile::ProfileCommandError),
 }
 
@@ -83,6 +89,7 @@ impl fmt::Display for CliError {
         match self {
             Self::Codex(error) => error.fmt(formatter),
             Self::Host(error) => error.fmt(formatter),
+            Self::Init(error) => error.fmt(formatter),
             Self::Profile(error) => error.fmt(formatter),
         }
     }
@@ -93,6 +100,7 @@ impl Error for CliError {
         match self {
             Self::Codex(error) => Some(error),
             Self::Host(error) => Some(error),
+            Self::Init(error) => Some(error),
             Self::Profile(error) => Some(error),
         }
     }

@@ -24,13 +24,12 @@ use crate::{
     preflight::{PreflightError, resolve_launch},
     profile::{AgentState, LoadProfileError, Profile},
     runtime::{
-        HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError, execute, plan_codex_container,
+        HOST_BRIDGE_GUEST_NAME, HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError, execute,
+        plan_codex_container,
     },
 };
 
 use super::config::default_profile_path;
-
-const HOST_BRIDGE_GUEST_NAME: &str = "host.container.internal";
 
 #[derive(Debug, Args)]
 pub(super) struct CodexArgs {

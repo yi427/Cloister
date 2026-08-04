@@ -25,6 +25,65 @@ const WORKSPACE_GUEST_PATH: &str = "/workspace";
 /// Executable used for the Apple container runtime.
 pub const APPLE_CONTAINER_PROGRAM: &str = "container";
 
+/// Guest DNS name forwarded to macOS loopback for the authenticated host bridge.
+pub const HOST_BRIDGE_GUEST_NAME: &str = "host.container.internal";
+
+/// Documentation-range address used by Apple container's localhost forwarding.
+pub const HOST_BRIDGE_LOCALHOST_ADDRESS: &str = "203.0.113.113";
+
+/// Produces the read-only system status query used by readiness checks.
+pub fn system_status_command() -> CommandSpec {
+    apple_container_command(["system", "status", "--format", "json"])
+}
+
+/// Produces the command that starts Apple container's system services.
+pub fn system_start_command() -> CommandSpec {
+    apple_container_command(["system", "start"])
+}
+
+/// Produces a read-only query for one exact image reference.
+pub fn image_inspect_command(reference: &str) -> CommandSpec {
+    apple_container_command(["image", "inspect", reference])
+}
+
+/// Produces an ARM64-only pull for one exact image reference.
+pub fn image_pull_command(reference: &str) -> CommandSpec {
+    apple_container_command(["image", "pull", "--arch", "arm64", reference])
+}
+
+/// Produces the read-only DNS domain query used by readiness checks.
+pub fn dns_list_command() -> CommandSpec {
+    apple_container_command(["system", "dns", "list", "--format", "json"])
+}
+
+/// Produces the privileged, explicit localhost forwarding command.
+pub fn dns_create_command() -> CommandSpec {
+    CommandSpec {
+        program: OsString::from("sudo"),
+        arguments: [
+            APPLE_CONTAINER_PROGRAM,
+            "system",
+            "dns",
+            "create",
+            HOST_BRIDGE_GUEST_NAME,
+            "--localhost",
+            HOST_BRIDGE_LOCALHOST_ADDRESS,
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .collect(),
+        secret_environment: Vec::new(),
+    }
+}
+
+fn apple_container_command<'a>(arguments: impl IntoIterator<Item = &'a str>) -> CommandSpec {
+    CommandSpec {
+        program: OsString::from(APPLE_CONTAINER_PROGRAM),
+        arguments: arguments.into_iter().map(OsString::from).collect(),
+        secret_environment: Vec::new(),
+    }
+}
+
 /// Transient MCP endpoint and bearer token injected for one Codex invocation.
 #[derive(Clone, Copy)]
 pub struct HostBridgeLaunch<'a> {

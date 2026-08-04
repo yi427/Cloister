@@ -129,12 +129,33 @@ cargo run -- codex -- --version
 ```
 
 Profile selection is explicit `--profile`, otherwise
-`~/.config/cloister/profile.toml` is required. To create the default Profile
-from the documented example:
+`~/.config/cloister/profile.toml` is required. Initialize it interactively with:
 
 ```sh
-mkdir -p ~/.config/cloister
-cp examples/codex.toml ~/.config/cloister/profile.toml
+cargo run -- init
+```
+
+`init` asks for the Profile name, exact image reference, guest CPU and memory
+limits, and whether Codex state should persist across projects. Its release-image
+default is derived from the CLI version, for example
+`ghcr.io/yi427/cloister:0.1.0`. A source checkout can explicitly select the
+locally built `cloister:dev` image instead.
+
+The command refuses to overwrite any existing file, directory, or symbolic link
+at the target Profile path. It writes a newly confirmed Profile atomically with
+owner-only permissions. If Apple `container` is missing, `init` prints the
+official installation location and can create only the Profile when explicitly
+confirmed. If the runtime is stopped, the image is absent, or the host DNS name
+is missing, each change is shown and confirmed separately. DNS setup uses
+`sudo`, warns that Apple's localhost forwarding disables Private Relay, and is
+declined by default. A final readiness report uses the same checks as
+`cloister check`, so incomplete or declined setup exits unsuccessfully without
+hiding what remains.
+
+Select another new Profile path with:
+
+```sh
+cargo run -- init --profile /path/to/profile.toml
 ```
 
 Check that Cloister is ready before launching Codex:
@@ -143,12 +164,13 @@ Check that Cloister is ready before launching Codex:
 cargo run -- check
 ```
 
-The check is read-only. It validates the selected Profile, confirms that the
-Apple `container` service is running, verifies that the Profile's exact image
-reference has a compatible Linux ARM64 variant, and checks that
-`host.container.internal` is configured. It does not start the runtime, pull or
-build an image, create the DNS mapping, or change the Profile. Every applicable
-check is reported, and the command exits unsuccessfully if any check fails.
+The separate `check` command is read-only. It validates the selected Profile,
+confirms that the Apple `container` service is running, verifies that the
+Profile's exact image reference has a compatible Linux ARM64 variant, and
+checks that `host.container.internal` is configured. It does not start the
+runtime, pull or build an image, create the DNS mapping, or change the Profile.
+Every applicable check is reported, and the command exits unsuccessfully if any
+check fails.
 
 Select a non-default Profile explicitly when needed:
 

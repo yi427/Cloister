@@ -1,20 +1,19 @@
 //! Read-only readiness checks for the natural agent workflow.
 
-use std::{ffi::OsStr, path::PathBuf, process::ExitCode};
-
-use clap::{Args, ValueHint};
-use serde::Deserialize;
-use tokio::process::Command;
+use std::{path::PathBuf, process::ExitCode};
 
 use crate::{
     error::message,
     profile::{Architecture, Profile, load_profile},
-    runtime::APPLE_CONTAINER_PROGRAM,
+    runtime::{
+        CommandSpec, HOST_BRIDGE_GUEST_NAME, RuntimeExecutionError, dns_list_command,
+        execute_output, image_inspect_command, system_status_command,
+    },
 };
+use clap::{Args, ValueHint};
+use serde::Deserialize;
 
 use super::config::default_profile_path;
-
-const HOST_BRIDGE_GUEST_NAME: &str = "host.container.internal";
 
 #[derive(Debug, Args)]
 pub(super) struct CheckArgs {
@@ -27,27 +26,31 @@ pub(super) struct CheckArgs {
 
 impl CheckArgs {
     pub(super) async fn execute(self) -> ExitCode {
-        let mut report = CheckReport::default();
-
-        let profile = check_profile(self.profile, &mut report);
-        let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
-
-        match (&profile, runtime_ready) {
-            (Some(profile), true) => {
-                record_result(&mut report, "Image", check_image(profile).await);
-            }
-            (None, _) => report.skip("Image", "Profile is unavailable"),
-            (Some(_), false) => report.skip("Image", "runtime is unavailable"),
-        }
-
-        if runtime_ready {
-            record_result(&mut report, "DNS", check_dns().await);
-        } else {
-            report.skip("DNS", "runtime is unavailable");
-        }
-
-        report.finish()
+        execute_checks(self.profile).await
     }
+}
+
+pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
+    let mut report = CheckReport::default();
+
+    let profile = check_profile(profile_path, &mut report);
+    let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
+
+    match (&profile, runtime_ready) {
+        (Some(profile), true) => {
+            record_result(&mut report, "Image", check_image(profile).await);
+        }
+        (None, _) => report.skip("Image", "Profile is unavailable"),
+        (Some(_), false) => report.skip("Image", "runtime is unavailable"),
+    }
+
+    if runtime_ready {
+        record_result(&mut report, "DNS", check_dns().await);
+    } else {
+        report.skip("DNS", "runtime is unavailable");
+    }
+
+    report.finish()
 }
 
 fn check_profile(path: Option<PathBuf>, report: &mut CheckReport) -> Option<Profile> {
@@ -75,9 +78,9 @@ fn check_profile(path: Option<PathBuf>, report: &mut CheckReport) -> Option<Prof
 }
 
 async fn check_runtime() -> Result<String, String> {
-    let arguments = ["system", "status", "--format", "json"];
-    let output = container_output(&arguments).await?;
-    let status: RuntimeStatus = parse_json(&output, &arguments)?;
+    let command = system_status_command();
+    let output = command_output(&command).await?;
+    let status: RuntimeStatus = parse_json(&output, &command)?;
     if status.status != "running" {
         return Err(format!("Apple container service is {}", status.status));
     }
@@ -87,9 +90,9 @@ async fn check_runtime() -> Result<String, String> {
 
 async fn check_image(profile: &Profile) -> Result<String, String> {
     let reference = profile.image.reference.as_str();
-    let arguments = ["image", "inspect", reference];
-    let output = container_output(&arguments).await?;
-    let images: Vec<ImageInspection> = parse_json(&output, &arguments)?;
+    let command = image_inspect_command(reference);
+    let output = command_output(&command).await?;
+    let images: Vec<ImageInspection> = parse_json(&output, &command)?;
     let architecture = architecture_name(profile.image.architecture);
     let has_compatible_variant = images.iter().any(|image| {
         image.variants.iter().any(|variant| {
@@ -106,9 +109,9 @@ async fn check_image(profile: &Profile) -> Result<String, String> {
 }
 
 async fn check_dns() -> Result<String, String> {
-    let arguments = ["system", "dns", "list", "--format", "json"];
-    let output = container_output(&arguments).await?;
-    let domains: Vec<String> = parse_json(&output, &arguments)?;
+    let command = dns_list_command();
+    let output = command_output(&command).await?;
+    let domains: Vec<String> = parse_json(&output, &command)?;
     if !domains
         .iter()
         .any(|domain| domain == HOST_BRIDGE_GUEST_NAME)
@@ -121,19 +124,19 @@ async fn check_dns() -> Result<String, String> {
     Ok(format!("'{HOST_BRIDGE_GUEST_NAME}' is configured"))
 }
 
-async fn container_output(arguments: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new(APPLE_CONTAINER_PROGRAM)
-        .args(arguments.iter().map(OsStr::new))
-        .output()
-        .await
-        .map_err(|error| format!("failed to start '{APPLE_CONTAINER_PROGRAM}': {error}"))?;
+pub(super) async fn command_output(command: &CommandSpec) -> Result<Vec<u8>, String> {
+    let output = execute_output(command).await.map_err(|error| match error {
+        RuntimeExecutionError::Start { program, source } => {
+            format!("failed to start '{}': {source}", program.to_string_lossy())
+        }
+    })?;
 
     if output.status.success() {
         return Ok(output.stdout);
     }
 
     let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    let command = format!("{APPLE_CONTAINER_PROGRAM} {}", arguments.join(" "));
+    let command = command_description(command);
     if detail.is_empty() {
         Err(format!("'{command}' exited with {}", output.status))
     } else {
@@ -141,17 +144,29 @@ async fn container_output(arguments: &[&str]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn parse_json<T>(output: &[u8], arguments: &[&str]) -> Result<T, String>
+pub(super) fn parse_json<T>(output: &[u8], command: &CommandSpec) -> Result<T, String>
 where
     T: for<'de> Deserialize<'de>,
 {
     serde_json::from_slice(output).map_err(|error| {
         format!(
-            "'{} {}' returned invalid JSON: {error}",
-            APPLE_CONTAINER_PROGRAM,
-            arguments.join(" ")
+            "'{}' returned invalid JSON: {error}",
+            command_description(command),
         )
     })
+}
+
+pub(super) fn command_description(command: &CommandSpec) -> String {
+    std::iter::once(command.program())
+        .chain(
+            command
+                .arguments()
+                .iter()
+                .map(|argument| argument.as_os_str()),
+        )
+        .map(|part| part.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 const fn architecture_name(architecture: Architecture) -> &'static str {
