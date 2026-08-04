@@ -1,6 +1,8 @@
 //! Command-line interface for Cloister.
 
+mod check;
 mod codex;
+mod config;
 mod host;
 mod profile;
 
@@ -10,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 use crate::error::message;
 
+use self::check::CheckArgs;
 use self::codex::CodexArgs;
 use self::host::HostArgs;
 use self::profile::ProfileArgs;
@@ -29,6 +32,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Check whether Cloister is ready to launch an agent.
+    Check(CheckArgs),
     /// Run Codex in the selected project.
     Codex(CodexArgs),
     /// Serve or exercise the host shell MCP bridge.
@@ -51,6 +56,7 @@ pub async fn run() -> ExitCode {
 impl Command {
     async fn execute(self) -> Result<ExitCode, CliError> {
         match self {
+            Self::Check(arguments) => Ok(arguments.execute().await),
             Self::Codex(arguments) => arguments.execute().await.map_err(CliError::Codex),
             Self::Host(arguments) => arguments
                 .execute()

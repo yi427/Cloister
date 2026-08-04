@@ -28,6 +28,8 @@ use crate::{
     },
 };
 
+use super::config::default_profile_path;
+
 const HOST_BRIDGE_GUEST_NAME: &str = "host.container.internal";
 
 #[derive(Debug, Args)]
@@ -182,7 +184,7 @@ impl RunningHostBridge {
 fn load_selected_profile(path: Option<&Path>) -> Result<Profile, CodexCommandError> {
     let path = match path {
         Some(path) => path.to_owned(),
-        None => default_profile_path()?,
+        None => default_profile_path().ok_or(CodexCommandError::HomeDirectoryMissing)?,
     };
     crate::profile::load_profile(path).map_err(CodexCommandError::Load)
 }
@@ -193,19 +195,6 @@ fn child_exit_code(status: ExitStatus) -> ExitCode {
         .and_then(|code| u8::try_from(code).ok())
         .map(ExitCode::from)
         .unwrap_or(ExitCode::FAILURE)
-}
-
-fn default_profile_path() -> Result<PathBuf, CodexCommandError> {
-    env::var_os("XDG_CONFIG_HOME")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME")
-                .filter(|path| !path.is_empty())
-                .map(|home| PathBuf::from(home).join(".config"))
-        })
-        .map(|directory| directory.join("cloister/profile.toml"))
-        .ok_or(CodexCommandError::HomeDirectoryMissing)
 }
 
 fn codex_state_directory_path() -> Result<PathBuf, CodexCommandError> {

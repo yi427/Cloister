@@ -4,6 +4,8 @@ mod apple_container;
 mod executor;
 mod plan;
 
-pub use apple_container::{HostBridgeLaunch, RuntimePlanError, plan_codex_container};
+pub use apple_container::{
+    APPLE_CONTAINER_PROGRAM, HostBridgeLaunch, RuntimePlanError, plan_codex_container,
+};
 pub use executor::{RuntimeExecutionError, execute};
 pub use plan::{CodexStateMount, CommandSpec, NetworkExposure, RuntimePlan, WorkspaceMount};

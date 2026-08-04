@@ -22,6 +22,9 @@ const CODEX_STATE_GUEST_PATH: &str = "/cloister/agents/codex";
 const HOST_BRIDGE_TOKEN_ENVIRONMENT: &str = "CLOISTER_HOST_BRIDGE_TOKEN";
 const WORKSPACE_GUEST_PATH: &str = "/workspace";
 
+/// Executable used for the Apple container runtime.
+pub const APPLE_CONTAINER_PROGRAM: &str = "container";
+
 /// Transient MCP endpoint and bearer token injected for one Codex invocation.
 #[derive(Clone, Copy)]
 pub struct HostBridgeLaunch<'a> {
@@ -238,7 +241,7 @@ impl ContainerRunCommandBuilder {
         arguments.extend(self.container_command);
 
         CommandSpec {
-            program: OsString::from("container"),
+            program: OsString::from(APPLE_CONTAINER_PROGRAM),
             arguments,
             secret_environment: self.secret_environment,
         }

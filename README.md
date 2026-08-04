@@ -128,6 +128,28 @@ mkdir -p ~/.config/cloister
 cp examples/codex.toml ~/.config/cloister/profile.toml
 ```
 
+Check that Cloister is ready before launching Codex:
+
+```sh
+cargo run -- check
+```
+
+The check is read-only. It validates the selected Profile, confirms that the
+Apple `container` service is running, verifies that the Profile's exact image
+reference has a compatible Linux ARM64 variant, and checks that
+`host.container.internal` is configured. It does not start the runtime, pull or
+build an image, create the DNS mapping, or change the Profile. Every applicable
+check is reported, and the command exits unsuccessfully if any check fails.
+
+Select a non-default Profile explicitly when needed:
+
+```sh
+cargo run -- check --profile examples/codex.toml
+```
+
+`cloister profile check <path>` remains the narrower static Profile validation
+command; it does not inspect the host runtime, image store, or DNS setup.
+
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. A Codex Profile can set
 `state = "isolated"` for temporary per-container state instead of the default
 cross-project shared state. Shared state can contain authentication tokens,
