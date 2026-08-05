@@ -121,6 +121,7 @@ struct ExecutionRecord {
 #[derive(Debug)]
 struct ExecutionRecordState {
     state: HostExecutionState,
+    terminal_duration_ms: Option<u64>,
     exit_code: Option<i32>,
     chunks: Vec<HostOutputChunk>,
     next_cursor: u64,
@@ -145,6 +146,7 @@ impl ExecutionRecord {
             terminal: Notify::new(),
             inner: Mutex::new(ExecutionRecordState {
                 state: HostExecutionState::Running,
+                terminal_duration_ms: None,
                 exit_code: None,
                 chunks: Vec::new(),
                 next_cursor: 0,
@@ -165,7 +167,9 @@ impl ExecutionRecord {
         HostExecOutput {
             execution_id: self.execution_id.clone(),
             state: inner.state,
-            duration_ms: elapsed_ms(self.started),
+            duration_ms: inner
+                .terminal_duration_ms
+                .unwrap_or_else(|| elapsed_ms(self.started)),
             exit_code: inner.exit_code,
             chunks: inner
                 .chunks
@@ -209,10 +213,11 @@ impl ExecutionRecord {
         }
     }
 
-    fn finish(&self, state: HostExecutionState, exit_code: Option<i32>) {
+    fn finish(&self, state: HostExecutionState, exit_code: Option<i32>, duration_ms: u64) {
         {
             let mut inner = self.inner.lock().expect("execution record poisoned");
             inner.state = state;
+            inner.terminal_duration_ms = Some(duration_ms);
             inner.exit_code = exit_code;
         }
         self.terminal.notify_waiters();
@@ -506,7 +511,7 @@ async fn supervise(
         );
         snapshot.state = HostExecutionState::Failed;
     }
-    record.finish(snapshot.state, exit_code);
+    record.finish(snapshot.state, exit_code, snapshot.duration_ms);
     eprintln!(
         "audit capability=host.exec execution_id={:?} command={:?} outcome={:?} exit_code={:?} duration_ms={} stdout_bytes={} stderr_bytes={} output_truncated={}",
         record.execution_id,
@@ -735,7 +740,7 @@ mod tests {
                 "test".to_owned(),
                 AuditExecutionMetadata::test(&format!("exec_{index}")),
             ));
-            record.finish(HostExecutionState::Completed, Some(0));
+            record.finish(HostExecutionState::Completed, Some(0), 0);
             manager.register(record);
         }
 

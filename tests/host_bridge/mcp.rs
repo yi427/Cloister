@@ -345,6 +345,40 @@ async fn executes_an_allowed_command_without_shell_parsing() {
 }
 
 #[tokio::test]
+async fn terminal_execution_duration_stops_advancing() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("quick-command");
+    fs::write(&executable, "#!/bin/sh\nexit 0\n").expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("quick-command", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(&endpoint, &token, &request("quick-command", &[]))
+        .await
+        .expect("host.exec should start the command");
+    let output = wait_for_terminal(&endpoint, &token, output).await;
+    let terminal_duration_ms = output.duration_ms;
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let later = call_host_exec_status(
+        &endpoint,
+        &token,
+        &HostExecStatusRequest {
+            execution_id: output.execution_id,
+            cursor: Some(output.next_cursor),
+        },
+    )
+    .await
+    .expect("host.exec_status should retain the terminal execution");
+
+    assert_eq!(later.state, HostExecutionState::Completed);
+    assert_eq!(later.duration_ms, terminal_duration_ms);
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
 async fn persists_lifecycle_metadata_without_arguments_output_or_environment_values() {
     let directory = tempdir().expect("temporary directory should exist");
     let token = create_token(&directory.path().join("bridge.token"));
