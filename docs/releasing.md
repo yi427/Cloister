@@ -27,8 +27,16 @@ For example, Cloister CLI `0.1.0` selects
 
 ## CLI distribution boundary
 
-The 0.1.x CLI is installed from an exact Git tag and compiled locally with
-Cargo:
+The 0.1.x CLI is distributed through the official `yi427/tap` Homebrew tap.
+The Formula downloads the immutable release archive, verifies its SHA-256,
+installs the Apple `container` runtime dependency, and compiles Cloister with
+Homebrew's Rust toolchain.
+
+```sh
+brew install yi427/tap/cloister
+```
+
+Direct installation from the exact Git tag remains supported:
 
 ```sh
 cargo install --locked \
@@ -37,10 +45,19 @@ cargo install --locked \
   cloister
 ```
 
-The first release does not attach prebuilt binaries and does not publish a
-Homebrew formula. Those are separate future distribution channels. A GitHub
-Release may still provide reviewed release notes and GitHub's source archives;
-the annotated Git tag remains the source of truth.
+The release does not attach prebuilt binaries. GitHub Releases provide reviewed
+notes and source archives; the annotated Git tag remains the source of truth.
+The Homebrew Formula is downstream distribution metadata and must never move or
+replace a Cloister tag.
+
+The Formula is maintained in `yi427/homebrew-tap`. For every release, update
+its URL and SHA-256, then run:
+
+```sh
+brew audit --strict --online yi427/tap/cloister
+brew install --build-from-source yi427/tap/cloister
+brew test yi427/tap/cloister
+```
 
 ## Image tags
 
@@ -103,6 +120,9 @@ Before creating a release tag, all of the following must be true:
     against the exact release image.
 12. Create a GitHub Release from the verified tag with reviewed notes and no
     binary attachments for 0.1.x.
+13. Update `Formula/cloister.rb` in `yi427/homebrew-tap` to the immutable release
+    archive and SHA-256, then audit, install from source, and test the Formula
+    before publishing it.
 
 Example for version `0.1.0`:
 
@@ -129,6 +149,8 @@ match the root `cloister` package version in `Cargo.toml`.
 - [ ] `init`, `check`, Codex, Claude, Host Exec, cancellation, and audit smoke
   tests pass against `ghcr.io/yi427/cloister:0.1.0`.
 - [ ] A GitHub Release is created with source archives and no binary assets.
+- [ ] The official Homebrew Formula points at the exact release archive and
+  passes audit, source installation, and `brew test`.
 
 ## Local development image
 
