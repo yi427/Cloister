@@ -1,5 +1,5 @@
-# Profile V4 example for Cloister agent commands.
-schema_version = 4
+# Profile V5 example for Cloister agent commands.
+schema_version = 5
 name = "default"
 
 [image]
@@ -18,3 +18,15 @@ mode = "default"
 
 [agent]
 state = "shared"
+
+[host.exec]
+enabled = true
+
+[host.exec.environment]
+mode = "inherit-all"
+
+[[host.exec.allow]]
+name = "xcodebuild"
+executable = "/usr/bin/xcodebuild"
+description = "Build and test Xcode projects"
+arguments = "any"

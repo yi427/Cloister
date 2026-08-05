@@ -10,13 +10,13 @@ use std::{
 use crate::{
     agent::{AgentAdapter, AgentCommand, AgentHostBridge},
     error::message,
-    preflight::ResolvedLaunch,
+    preflight::{HostExecutableCheckError, ResolvedLaunch, inspect_host_executable},
     profile::{AgentState, Architecture, NetworkMode, Profile},
 };
 
 use super::plan::{
-    AgentStateMount, CommandSpec, NetworkExposure, RuntimePlan, SecretEnvironmentVariable,
-    WorkspaceMount,
+    AgentStateMount, CommandSpec, HostCommandPlan, NetworkExposure, RuntimePlan,
+    SecretEnvironmentVariable, WorkspaceMount,
 };
 
 const HOST_BRIDGE_TOKEN_ENVIRONMENT: &str = "CLOISTER_HOST_BRIDGE_TOKEN";
@@ -146,6 +146,33 @@ pub fn plan_agent_container(
     };
     let agent_bridge = host_bridge
         .map(|bridge| AgentHostBridge::new(bridge.endpoint, HOST_BRIDGE_TOKEN_ENVIRONMENT));
+    let host_commands = match host_bridge {
+        Some(_) if !resolved.profile().host.exec.enabled => {
+            return Err(RuntimePlanError::HostExecDisabled);
+        }
+        Some(_) => resolved
+            .profile()
+            .host
+            .exec
+            .allow
+            .iter()
+            .map(|command| {
+                let executable =
+                    inspect_host_executable(&command.executable).map_err(|source| {
+                        RuntimePlanError::HostExecutable {
+                            command: command.name.clone(),
+                            source,
+                        }
+                    })?;
+                Ok(HostCommandPlan {
+                    name: command.name.clone(),
+                    declared: executable.declared().to_owned(),
+                    resolved: executable.resolved().to_owned(),
+                })
+            })
+            .collect::<Result<Vec<_>, RuntimePlanError>>()?,
+        None => Vec::new(),
+    };
     let agent_command = agent.build_command(agent_bridge, agent_arguments);
     let command = build_run_command(
         resolved.profile(),
@@ -163,6 +190,7 @@ pub fn plan_agent_container(
         workspace,
         agent_state,
         host_bridge_endpoint: host_bridge.map(|bridge| bridge.endpoint.to_owned()),
+        host_commands,
         command,
     })
 }
@@ -314,10 +342,19 @@ fn reject_mount_separator(path: &Path) -> Result<(), RuntimePlanError> {
 }
 
 /// Profile or launch input that cannot be represented safely.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum RuntimePlanError {
-    MountPathContainsSeparator { path: OsString },
-    SharedAgentStateMissing { agent: &'static str },
+    MountPathContainsSeparator {
+        path: OsString,
+    },
+    SharedAgentStateMissing {
+        agent: &'static str,
+    },
+    HostExecDisabled,
+    HostExecutable {
+        command: String,
+        source: HostExecutableCheckError,
+    },
 }
 
 impl fmt::Display for RuntimePlanError {
@@ -334,8 +371,24 @@ impl fmt::Display for RuntimePlanError {
                 "shared {agent} {}",
                 message::SHARED_AGENT_STATE_MISSING
             ),
+            Self::HostExecDisabled => {
+                formatter.write_str("Host Exec is disabled by the selected Profile")
+            }
+            Self::HostExecutable { command, source } => write!(
+                formatter,
+                "host command '{command}' is unavailable: {source}"
+            ),
         }
     }
 }
 
-impl Error for RuntimePlanError {}
+impl Error for RuntimePlanError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::HostExecutable { source, .. } => Some(source),
+            Self::MountPathContainsSeparator { .. }
+            | Self::SharedAgentStateMissing { .. }
+            | Self::HostExecDisabled => None,
+        }
+    }
+}

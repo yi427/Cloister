@@ -1,6 +1,8 @@
 //! Interactive setup for the default Cloister environment.
 
 use std::{
+    collections::BTreeSet,
+    env,
     error::Error,
     fmt, fs,
     io::{self, BufRead, Write},
@@ -15,9 +17,12 @@ use tempfile::NamedTempFile;
 
 use crate::{
     error::message,
+    preflight::{HostExecutableCheckError, inspect_host_executable, resolve_host_command},
     profile::{
-        AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, ImageProfile, MemorySize,
-        NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION, Profile, validate_profile,
+        AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, HostExecAllowProfile,
+        HostExecArguments, HostExecEnvironmentMode, HostExecEnvironmentProfile, HostExecProfile,
+        HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION,
+        Profile, validate_profile,
     },
     runtime::{
         CommandSpec, HOST_BRIDGE_GUEST_NAME, dns_create_command, dns_list_command, execute,
@@ -41,7 +46,7 @@ const DEFAULT_USER: &str = "cloister";
 
 #[derive(Debug, Args)]
 pub(super) struct InitArgs {
-    /// Path where the new Profile V4 TOML file will be created.
+    /// Path where the new Profile V5 TOML file will be created.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -127,6 +132,7 @@ fn prompt_profile(
         "Persist agent credentials, settings, and session history across projects?",
         true,
     )?;
+    let host_commands = prompt_host_commands(input, output)?;
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
         name,
@@ -151,9 +157,101 @@ fn prompt_profile(
                 AgentState::Isolated
             },
         },
+        host: HostProfile {
+            exec: HostExecProfile {
+                enabled: true,
+                environment: HostExecEnvironmentProfile {
+                    mode: HostExecEnvironmentMode::InheritAll,
+                },
+                allow: host_commands,
+            },
+        },
     };
     validate_profile(&profile).map_err(|source| InitCommandError::GeneratedProfile { source })?;
     Ok(profile)
+}
+
+#[derive(Debug)]
+struct HostCommandSelection {
+    profile: HostExecAllowProfile,
+    resolved: PathBuf,
+}
+
+fn prompt_host_commands(
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<Vec<HostExecAllowProfile>, InitCommandError> {
+    writeln!(
+        output,
+        "\nHost Exec commands run on macOS with your user permissions."
+    )?;
+    writeln!(
+        output,
+        "Each selected command currently permits arbitrary arguments."
+    )?;
+    let path = env::var_os("PATH");
+
+    loop {
+        let value = prompt_line(
+            input,
+            output,
+            "Allowed host commands, comma-separated [none]: ",
+        )?;
+        if value.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        match resolve_host_commands(&value, path.as_deref()) {
+            Ok(selections) => {
+                writeln!(output, "Resolved host commands:")?;
+                for selection in &selections {
+                    writeln!(
+                        output,
+                        "  {}: declared '{}', resolved '{}'",
+                        selection.profile.name,
+                        selection.profile.executable.display(),
+                        selection.resolved.display()
+                    )?;
+                }
+                return Ok(selections
+                    .into_iter()
+                    .map(|selection| selection.profile)
+                    .collect());
+            }
+            Err(detail) => writeln!(output, "Could not add host commands: {detail}")?,
+        }
+    }
+}
+
+fn resolve_host_commands(
+    value: &str,
+    path: Option<&std::ffi::OsStr>,
+) -> Result<Vec<HostCommandSelection>, String> {
+    let mut names = BTreeSet::new();
+    let mut selections = Vec::new();
+
+    for entry in value.split(',') {
+        let name = entry.trim();
+        if name.is_empty() {
+            return Err("the command list contains an empty entry".to_owned());
+        }
+        if !names.insert(name) {
+            return Err(format!("command '{name}' was listed more than once"));
+        }
+
+        let executable = resolve_host_command(name, path).map_err(|error| error.to_string())?;
+        selections.push(HostCommandSelection {
+            profile: HostExecAllowProfile {
+                name: name.to_owned(),
+                executable: executable.declared().to_owned(),
+                description: format!("Run {name} on the macOS host"),
+                arguments: HostExecArguments::Any,
+            },
+            resolved: executable.resolved().to_owned(),
+        });
+    }
+
+    Ok(selections)
 }
 
 fn prompt_non_blank(
@@ -269,6 +367,27 @@ fn print_summary(
             "  Agent state: shared (separate per agent; may contain credentials and history)"
         )?,
         AgentState::Isolated => writeln!(output, "  Agent state: isolated (ephemeral)")?,
+    }
+    let host_policy = &profile.host.exec;
+    writeln!(
+        output,
+        "  Host exec policy: enabled, inherit-all environment, {} allowed command(s)",
+        host_policy.allow.len()
+    )?;
+    for command in &host_policy.allow {
+        let executable = inspect_host_executable(&command.executable).map_err(|source| {
+            InitCommandError::HostExecutableChanged {
+                command: command.name.clone(),
+                source,
+            }
+        })?;
+        writeln!(
+            output,
+            "    {}: declared '{}', resolved '{}', arguments any",
+            command.name,
+            executable.declared().display(),
+            executable.resolved().display()
+        )?;
     }
     Ok(())
 }
@@ -538,16 +657,41 @@ struct RuntimeStatus {
 #[derive(Debug)]
 pub(super) enum InitCommandError {
     HomeDirectoryMissing,
-    ProfileExists { path: PathBuf },
-    InspectTarget { path: PathBuf, source: io::Error },
+    ProfileExists {
+        path: PathBuf,
+    },
+    InspectTarget {
+        path: PathBuf,
+        source: io::Error,
+    },
     Input(io::Error),
     InputClosed,
-    GeneratedProfile { source: garde::Report },
-    CreateParent { path: PathBuf, source: io::Error },
-    Serialize { source: toml::ser::Error },
-    CreateTemporary { path: PathBuf, source: io::Error },
-    Write { path: PathBuf, source: io::Error },
-    Persist { path: PathBuf, source: io::Error },
+    HostExecutableChanged {
+        command: String,
+        source: HostExecutableCheckError,
+    },
+    GeneratedProfile {
+        source: garde::Report,
+    },
+    CreateParent {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Serialize {
+        source: toml::ser::Error,
+    },
+    CreateTemporary {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Write {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Persist {
+        path: PathBuf,
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for InitCommandError {
@@ -566,6 +710,10 @@ impl fmt::Display for InitCommandError {
             Self::InputClosed => {
                 formatter.write_str("interactive input closed before setup completed")
             }
+            Self::HostExecutableChanged { command, source } => write!(
+                formatter,
+                "host command '{command}' changed during interactive setup: {source}"
+            ),
             Self::GeneratedProfile { source } => {
                 write!(formatter, "generated Profile is invalid: {source}")
             }
@@ -607,6 +755,7 @@ impl Error for InitCommandError {
             | Self::Write { source, .. }
             | Self::Persist { source, .. }
             | Self::Input(source) => Some(source),
+            Self::HostExecutableChanged { source, .. } => Some(source),
             Self::GeneratedProfile { source } => Some(source),
             Self::Serialize { source } => Some(source),
             Self::HomeDirectoryMissing | Self::ProfileExists { .. } | Self::InputClosed => None,

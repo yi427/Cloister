@@ -6,7 +6,7 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-use cloister::profile::{AgentState, load_profile};
+use cloister::profile::{AgentState, HostExecArguments, HostExecEnvironmentMode, load_profile};
 use tempfile::tempdir;
 
 const FAKE_CONTAINER: &str = r#"#!/bin/sh
@@ -78,7 +78,7 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
     let output = run(
         &home,
         &bin,
-        "\n\n\n\n\n\n\n\ny\n",
+        "\n\n\n\n\n\n\n\n\ny\n",
         &[
             ("CLOISTER_TEST_RUNTIME_STATE", runtime_state.as_path()),
             ("CLOISTER_TEST_IMAGE_STATE", image_state.as_path()),
@@ -102,8 +102,16 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.to_string(), "8G");
     assert_eq!(profile.agent.state, AgentState::Shared);
-    assert!(profile_source.contains("schema_version = 4"));
+    assert!(profile.host.exec.enabled);
+    assert_eq!(
+        profile.host.exec.environment.mode,
+        HostExecEnvironmentMode::InheritAll
+    );
+    assert!(profile.host.exec.allow.is_empty());
+    assert!(profile_source.contains("schema_version = 5"));
     assert!(profile_source.contains("[agent]"));
+    assert!(profile_source.contains("[host.exec]"));
+    assert!(profile_source.contains("mode = \"inherit-all\""));
     assert!(!profile_source.contains("[codex]"));
     assert_eq!(
         fs::metadata(&profile_path)
@@ -121,6 +129,9 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
         stdout.contains(
             "Agent state: shared (separate per agent; may contain credentials and history)"
         )
+    );
+    assert!(
+        stdout.contains("Host exec policy: enabled, inherit-all environment, 0 allowed command(s)")
     );
     assert!(stdout.contains("Running: container system start"));
     assert!(
@@ -142,13 +153,84 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
 }
 
 #[test]
+fn resolves_and_writes_explicit_host_commands() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let bin = directory.path().join("bin");
+    let cargo = bin.join("cargo");
+    let xcodebuild = bin.join("xcodebuild");
+    write_executable(&cargo, "test executable\n");
+    write_executable(&xcodebuild, "test executable\n");
+
+    let output = run(&home, &bin, "\n\n\n\n\ncargo, xcodebuild\ny\n", &[]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let profile_path = home.join(".config/cloister/profile.toml");
+    let profile = load_profile(&profile_path).expect("generated Profile should load");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert_eq!(profile.host.exec.allow.len(), 2);
+    assert_eq!(profile.host.exec.allow[0].name, "cargo");
+    assert_eq!(profile.host.exec.allow[0].executable, cargo);
+    assert_eq!(
+        profile.host.exec.allow[0].description,
+        "Run cargo on the macOS host"
+    );
+    assert_eq!(profile.host.exec.allow[0].arguments, HostExecArguments::Any);
+    assert_eq!(profile.host.exec.allow[1].name, "xcodebuild");
+    assert_eq!(profile.host.exec.allow[1].executable, xcodebuild);
+    assert!(stdout.contains("Resolved host commands:"));
+    assert!(stdout.contains(&format!("cargo: declared '{}'", cargo.display())));
+    assert!(stdout.contains(&format!("xcodebuild: declared '{}'", xcodebuild.display())));
+    assert!(
+        stdout.contains("Host exec policy: enabled, inherit-all environment, 2 allowed command(s)")
+    );
+    assert!(stdout.contains("[PASS] Host command: 'cargo'"));
+    assert!(stdout.contains("[PASS] Host command: 'xcodebuild'"));
+    assert!(stdout.contains("[FAIL] Runtime: failed to start 'container'"));
+}
+
+#[test]
+fn reprompts_for_duplicate_or_unresolved_host_commands() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let bin = directory.path().join("bin");
+    write_executable(&bin.join("cargo"), "test executable\n");
+
+    let output = run(
+        &home,
+        &bin,
+        "\n\n\n\n\ncargo, cargo\nmissing\ncargo\nn\n",
+        &[],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        stdout
+            .matches("Allowed host commands, comma-separated [none]:")
+            .count(),
+        3
+    );
+    assert!(
+        stdout.contains("Could not add host commands: command 'cargo' was listed more than once")
+    );
+    assert!(stdout.contains(
+        "Could not add host commands: host command 'missing' was not found in an absolute PATH directory"
+    ));
+    assert!(stdout.ends_with("No changes made.\n"));
+    assert!(!home.join(".config/cloister/profile.toml").exists());
+}
+
+#[test]
 fn can_create_only_the_profile_when_container_is_missing() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
     let empty_bin = directory.path().join("empty-bin");
     fs::create_dir_all(&empty_bin).expect("empty bin should be created");
 
-    let output = run(&home, &empty_bin, "\n\n\n\n\ny\n", &[]);
+    let output = run(&home, &empty_bin, "\n\n\n\n\n\ny\n", &[]);
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     let profile = home.join(".config/cloister/profile.toml");
 
@@ -169,7 +251,7 @@ fn cancellation_before_missing_runtime_setup_writes_nothing() {
     let empty_bin = directory.path().join("empty-bin");
     fs::create_dir_all(&empty_bin).expect("empty bin should be created");
 
-    let output = run(&home, &empty_bin, "\n\n\n\n\n\n", &[]);
+    let output = run(&home, &empty_bin, "\n\n\n\n\n\n\n", &[]);
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
 
     assert!(output.status.success());

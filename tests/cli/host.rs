@@ -40,7 +40,9 @@ fn reports_a_missing_client_token_before_connecting() {
         "http://127.0.0.1:1/mcp",
         "--token-file",
         token.to_str().expect("UTF-8 path"),
-        "printf hello",
+        "allowed-command",
+        "--",
+        "--version",
     ]);
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 

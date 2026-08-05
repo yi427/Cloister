@@ -263,7 +263,7 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
         format!("mcp_servers.cloister_host.url=\"{endpoint}\""),
         "mcp_servers.cloister_host.bearer_token_env_var=\"CLOISTER_HOST_BRIDGE_TOKEN\"".to_owned(),
         "mcp_servers.cloister_host.required=true".to_owned(),
-        "mcp_servers.cloister_host.enabled_tools=[\"host.exec\"]".to_owned(),
+        "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\"]".to_owned(),
         "mcp_servers.cloister_host.default_tools_approval_mode=\"prompt\"".to_owned(),
     ] {
         assert!(
@@ -281,7 +281,9 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
 
     let display = plan.to_string();
     let debug = format!("{plan:?}");
-    assert!(display.contains("Host capability: host.exec"));
+    assert!(display.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(display.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
+    assert!(display.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
     assert!(display.contains("[REDACTED]"));
     assert!(!display.contains(token));
     assert!(!debug.contains(token));

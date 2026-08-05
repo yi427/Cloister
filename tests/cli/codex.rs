@@ -47,7 +47,7 @@ fn keeps_the_shared_agent_command_help() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Path to a Profile V4 TOML file"));
+    assert!(stdout.contains("Path to a Profile V5 TOML file"));
     assert!(stdout.contains("Print the runtime plan without starting the agent"));
     assert!(stdout.contains("Arguments passed directly to the agent"));
 }
@@ -78,10 +78,13 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     )));
     assert!(stdout.contains("\"CODEX_HOME=/cloister/agents/codex\""));
     assert!(stdout.contains("Host bridge: http://host.container.internal:17834/mcp"));
-    assert!(stdout.contains("Host capability: host.exec"));
+    assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
+    assert!(stdout.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
     assert!(stdout.contains("Host bridge token: ephemeral, forwarded, and redacted"));
     assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
     assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
+    assert!(stdout.contains("enabled_tools=[\\\"host.list_commands\\\",\\\"host.exec\\\"]"));
     assert!(stdout.contains("default_tools_approval_mode=\\\"prompt\\\""));
     assert!(stdout.contains("\"cloister:dev\""));
     assert!(!state.exists(), "dry-run must not create agent state");
@@ -108,6 +111,79 @@ fn can_disable_the_default_host_bridge() {
     assert!(stdout.contains("Host bridge: disabled"));
     assert!(!stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
     assert!(!stdout.contains("mcp_servers.cloister_host"));
+}
+
+#[test]
+fn profile_can_disable_the_host_bridge_without_inspecting_its_allowlist() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let profile_path = home.join("disabled-profile.toml");
+    fs::create_dir_all(&project).expect("project should be created");
+    fs::create_dir_all(&home).expect("home should be created");
+    let profile =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"))
+            .expect("example Profile should be readable")
+            .replace("enabled = true", "enabled = false")
+            .replace(
+                "executable = \"/usr/bin/xcodebuild\"",
+                "executable = \"/missing/xcodebuild\"",
+            );
+    fs::write(&profile_path, profile).expect("disabled Profile should be written");
+
+    let output = run(
+        &home,
+        &project,
+        None,
+        &[
+            "codex",
+            "--profile",
+            profile_path.to_str().expect("profile path should be UTF-8"),
+            "--dry-run",
+        ],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(stdout.contains("Host bridge: disabled"));
+    assert!(!stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
+}
+
+#[test]
+fn refuses_to_start_an_enabled_bridge_with_a_missing_executable() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let profile_path = home.join("missing-command.toml");
+    fs::create_dir_all(&project).expect("project should be created");
+    fs::create_dir_all(&home).expect("home should be created");
+    let profile =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"))
+            .expect("example Profile should be readable")
+            .replace(
+                "executable = \"/usr/bin/xcodebuild\"",
+                "executable = \"/missing/xcodebuild\"",
+            );
+    fs::write(&profile_path, profile).expect("test Profile should be written");
+
+    let output = run(
+        &home,
+        &project,
+        None,
+        &[
+            "codex",
+            "--profile",
+            profile_path.to_str().expect("profile path should be UTF-8"),
+            "--dry-run",
+        ],
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("host command 'xcodebuild' is unavailable"));
+    assert!(!home.join(".local/share/cloister/agents/codex").exists());
 }
 
 #[test]

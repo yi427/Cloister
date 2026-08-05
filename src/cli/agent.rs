@@ -20,9 +20,12 @@ use crate::{
     agent::AgentAdapter,
     error::message,
     host_bridge::{
-        BridgeToken, BridgeTokenError, HostBridgeServerError, serve as serve_host_bridge,
+        BridgeToken, BridgeTokenError, HostBridgeServerError, HostExecPolicy,
+        HostExecPolicyBuildError, serve as serve_host_bridge,
     },
-    preflight::{PreflightError, resolve_launch},
+    preflight::{
+        HostExecutableCheckError, PreflightError, inspect_host_executable, resolve_launch,
+    },
     profile::{AgentState, LoadProfileError, Profile},
     runtime::{
         HOST_BRIDGE_GUEST_NAME, HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError, execute,
@@ -34,7 +37,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct AgentArgs {
-    /// Path to a Profile V4 TOML file.
+    /// Path to a Profile V5 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -50,7 +53,7 @@ pub(super) struct AgentArgs {
     #[arg(long)]
     dry_run: bool,
 
-    /// Disable the default authenticated macOS host.exec MCP bridge.
+    /// Disable the Profile-enabled authenticated Host MCP bridge.
     #[arg(long)]
     no_host_bridge: bool,
 
@@ -73,6 +76,10 @@ pub(super) async fn execute_agent(
         None => env::current_dir().map_err(AgentCommandError::CurrentDirectory)?,
     };
     let resolved = resolve_launch(profile, workspace)?;
+    let host_bridge_enabled = !arguments.no_host_bridge && resolved.profile().host.exec.enabled;
+    if host_bridge_enabled {
+        validate_host_executables(resolved.profile())?;
+    }
 
     let shared_state = match resolved.profile().agent.state {
         AgentState::Isolated => None,
@@ -81,8 +88,7 @@ pub(super) async fn execute_agent(
     };
     if arguments.dry_run {
         let endpoint = host_bridge_endpoint(arguments.host_bridge_port);
-        let host_bridge =
-            (!arguments.no_host_bridge).then(|| HostBridgeLaunch::dry_run(endpoint.as_str()));
+        let host_bridge = host_bridge_enabled.then(|| HostBridgeLaunch::dry_run(endpoint.as_str()));
         let plan = plan_agent_container(
             &resolved,
             agent,
@@ -94,10 +100,20 @@ pub(super) async fn execute_agent(
         return Ok(ExitCode::SUCCESS);
     }
 
-    let host_bridge = if arguments.no_host_bridge {
+    let host_bridge = if !host_bridge_enabled {
         None
     } else {
-        Some(RunningHostBridge::start(arguments.host_bridge_port).await?)
+        let policy =
+            HostExecPolicy::from_profile(&resolved.profile().host.exec, env::vars_os().collect())?
+                .expect("enabled Profile policy should produce a Host Exec policy");
+        Some(
+            RunningHostBridge::start(
+                arguments.host_bridge_port,
+                policy,
+                resolved.workspace().to_owned(),
+            )
+            .await?,
+        )
     };
     let bridge_launch = host_bridge.as_ref().map(RunningHostBridge::launch);
     let plan = match plan_agent_container(
@@ -136,15 +152,32 @@ fn host_bridge_endpoint(port: NonZeroU16) -> String {
     format!("http://{HOST_BRIDGE_GUEST_NAME}:{port}/mcp")
 }
 
+fn validate_host_executables(profile: &Profile) -> Result<(), AgentCommandError> {
+    for command in &profile.host.exec.allow {
+        inspect_host_executable(&command.executable).map_err(|source| {
+            AgentCommandError::HostExecutable {
+                command: command.name.clone(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
+}
+
 struct RunningHostBridge {
     token: BridgeToken,
     endpoint: String,
+    allowed_command_count: usize,
     cancellation: CancellationToken,
     task: JoinHandle<Result<(), HostBridgeServerError>>,
 }
 
 impl RunningHostBridge {
-    async fn start(port: NonZeroU16) -> Result<Self, AgentCommandError> {
+    async fn start(
+        port: NonZeroU16,
+        policy: HostExecPolicy,
+        working_directory: PathBuf,
+    ) -> Result<Self, AgentCommandError> {
         let token = BridgeToken::generate()?;
         let address = SocketAddr::from(([127, 0, 0, 1], port.get()));
         let listener = TcpListener::bind(address)
@@ -153,13 +186,22 @@ impl RunningHostBridge {
         let cancellation = CancellationToken::new();
         let server_cancellation = cancellation.clone();
         let server_token = token.clone();
+        let allowed_command_count = policy.command_count();
         let task = tokio::spawn(async move {
-            serve_host_bridge(listener, server_token, server_cancellation).await
+            serve_host_bridge(
+                listener,
+                server_token,
+                policy,
+                working_directory,
+                server_cancellation,
+            )
+            .await
         });
 
         Ok(Self {
             token,
             endpoint: host_bridge_endpoint(port),
+            allowed_command_count,
             cancellation,
             task,
         })
@@ -171,7 +213,10 @@ impl RunningHostBridge {
 
     fn announce(&self, agent_name: &str) {
         println!("Host bridge: {}", self.endpoint);
-        println!("Host capability: host.exec (arbitrary macOS user commands)");
+        println!(
+            "Host capabilities: host.list_commands, host.exec ({} Profile-allowed command(s); macOS user permissions)",
+            self.allowed_command_count
+        );
         println!("{agent_name} MCP approval: prompt");
     }
 
@@ -260,9 +305,14 @@ pub(super) enum AgentCommandError {
     BridgeServer(HostBridgeServerError),
     BridgeTask(tokio::task::JoinError),
     BridgeToken(BridgeTokenError),
+    BridgePolicy(HostExecPolicyBuildError),
     CurrentDirectory(io::Error),
     Execution(RuntimeExecutionError),
     HomeDirectoryMissing,
+    HostExecutable {
+        command: String,
+        source: HostExecutableCheckError,
+    },
     Load(LoadProfileError),
     Preflight(PreflightError),
     Plan(RuntimePlanError),
@@ -310,11 +360,18 @@ impl fmt::Display for AgentCommandError {
                 write!(formatter, "{}: {error}", message::BRIDGE_SERVE_FAILED)
             }
             Self::BridgeToken(error) => error.fmt(formatter),
+            Self::BridgePolicy(error) => {
+                write!(formatter, "failed to build Host Exec policy: {error}")
+            }
             Self::CurrentDirectory(source) => {
                 write!(formatter, "{}: {source}", message::CURRENT_DIRECTORY_FAILED)
             }
             Self::Execution(error) => error.fmt(formatter),
             Self::HomeDirectoryMissing => formatter.write_str(message::HOME_DIRECTORY_MISSING),
+            Self::HostExecutable { command, source } => write!(
+                formatter,
+                "host command '{command}' is unavailable: {source}"
+            ),
             Self::Load(error) => error.fmt(formatter),
             Self::Preflight(error) => error.fmt(formatter),
             Self::Plan(error) => error.fmt(formatter),
@@ -335,9 +392,11 @@ impl Error for AgentCommandError {
             Self::BridgeServer(error) => Some(error),
             Self::BridgeTask(error) => Some(error),
             Self::BridgeToken(error) => Some(error),
+            Self::BridgePolicy(error) => Some(error),
             Self::CurrentDirectory(source) => Some(source),
             Self::Execution(error) => Some(error),
             Self::HomeDirectoryMissing => None,
+            Self::HostExecutable { source, .. } => Some(source),
             Self::Load(error) => Some(error),
             Self::Preflight(error) => Some(error),
             Self::Plan(error) => Some(error),
@@ -366,5 +425,11 @@ impl From<RuntimeExecutionError> for AgentCommandError {
 impl From<BridgeTokenError> for AgentCommandError {
     fn from(error: BridgeTokenError) -> Self {
         Self::BridgeToken(error)
+    }
+}
+
+impl From<HostExecPolicyBuildError> for AgentCommandError {
+    fn from(error: HostExecPolicyBuildError) -> Self {
+        Self::BridgePolicy(error)
     }
 }

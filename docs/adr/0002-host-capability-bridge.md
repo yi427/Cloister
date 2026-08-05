@@ -1,6 +1,6 @@
 # ADR 0002: Minimal host command bridge
 
-- Status: Accepted for MVP, amended 2026-08-05
+- Status: Superseded by ADR 0004 on 2026-08-05
 - Date: 2026-07-29
 
 ## Context
@@ -10,7 +10,7 @@ native macOS tools. Cloister needs a small, natural escape hatch without
 designing a full capability and policy system before the basic AI workflow
 exists.
 
-## Decision
+## Historical decision
 
 Cloister provides one authenticated MCP tool:
 
@@ -46,8 +46,8 @@ The guest endpoint uses `host.container.internal`. Apple `container` must have
 an explicit localhost DNS domain for that name. Cloister does not silently run
 the privileged `container system dns create` operation.
 
-There is no command allowlist, per-tool policy, confirmation flow, sandbox, or
-path restriction in this version.
+There was no enforced command allowlist, per-tool policy, confirmation flow,
+sandbox, or path restriction in this version.
 
 ## Security boundary
 
@@ -69,7 +69,16 @@ deliberately grants the guest a path to the macOS user's authority.
 Stronger command policy can be added only when real usage shows which
 boundaries are needed.
 
+## Successor
+
+[`ADR 0004`](0004-profile-governed-host-execution.md) replaces this runtime with
+a Profile V5 executable allowlist, structured argument vectors, environment
+policy, and command discovery. Those enforcement pieces are connected. Its
+asynchronous execution status, cancellation, Skill, dynamic schema enumeration,
+and JSONL auditing remain incomplete.
+
 ## Deferred
 
-Cloister does not yet create or repair the privileged Apple localhost DNS rule,
-provide a command allowlist, or attach policy to individual host commands.
+Cloister does not yet create or repair the privileged Apple localhost DNS rule.
+The successor does not yet implement asynchronous job management or persistent
+audit storage.

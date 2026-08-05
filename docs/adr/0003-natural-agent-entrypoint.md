@@ -53,21 +53,22 @@ There is no embedded fallback Profile. A missing default file is an explicit
 configuration error.
 
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` replace their respective home-relative
-base directories when set. Profile V4 controls image, resources, guest
-settings, explicit default networking, and a generic `[agent]` state policy.
+base directories when set. Profile V5 controls image, resources, guest
+settings, explicit default networking, a generic `[agent]` state policy, and
+the structured host-command allowlist enforced by the ADR 0004 bridge.
 That policy is either `shared` or `isolated` and applies to every supported
 agent, while each agent receives a separate Cloister-managed state directory.
-The development version deliberately rejects Profile V3 and its former
-`[codex]` table without aliases, migration, or inferred defaults.
+The development version deliberately rejects earlier Profile versions without
+aliases, migration, or inferred defaults.
 Workspace selection belongs to each CLI invocation, not the Profile.
 
-The natural entry points also enable the authenticated `cloister_host` MCP
-bridge by default. Codex receives transient `--config` values; Claude receives
-a transient inline `--mcp-config` with an environment-backed authorization
-header. Cloister does not add `--strict-mcp-config`, so the injected bridge does
-not suppress the user's other Claude MCP sources. Neither path mutates
-persistent agent configuration. `--no-host-bridge` provides an explicit
-minimum-capability invocation.
+The natural entry points enable the authenticated `cloister_host` MCP bridge
+when `[host.exec] enabled = true`. Codex receives transient `--config` values;
+Claude receives a transient inline `--mcp-config` with an environment-backed
+authorization header. Cloister does not add `--strict-mcp-config`, so the
+injected bridge does not suppress the user's other Claude MCP sources. Neither
+path mutates persistent agent configuration. `--no-host-bridge` provides an
+explicit minimum-capability invocation.
 
 `--dry-run` resolves and displays the selected workspace and state mount paths
 without creating or changing the agent state directory.
@@ -82,6 +83,7 @@ pre-existing `~/.codex` or `~/.claude`.
 The workspace remains a live read-write bind mount by default. The agent can
 modify or delete files in it.
 
-The default host bridge is a stronger boundary crossing: `host.exec` can run
-arbitrary commands with the macOS user's permissions. The runtime plan and
-startup output must state this capability directly.
+The host bridge is a stronger boundary crossing: `host.exec` can run only
+Profile-allowed executables, but those programs retain the macOS user's
+permissions and may themselves provide broad code execution. The runtime plan
+and startup output must state this capability directly.

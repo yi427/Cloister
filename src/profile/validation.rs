@@ -1,6 +1,8 @@
 //! Fail-closed validation rules for parsed profiles.
 
-use garde::{Error, Report, Validate};
+use std::{collections::BTreeSet, path::Path};
+
+use garde::{Error, Path as ValidationPath, Report, Validate};
 
 use crate::error::message;
 
@@ -14,7 +16,26 @@ pub type ProfileValidationErrors = Report;
 /// Host-dependent checks, such as whether a path exists or whether enough
 /// memory is available, belong to runtime preflight rather than this function.
 pub fn validate_profile(profile: &Profile) -> Result<(), ProfileValidationErrors> {
-    profile.validate()
+    let mut report = match profile.validate() {
+        Ok(()) => Report::new(),
+        Err(report) => report,
+    };
+
+    let mut names = BTreeSet::new();
+    for command in &profile.host.exec.allow {
+        if !names.insert(command.name.as_str()) {
+            report.append(
+                ValidationPath::new("host").join("exec").join("allow"),
+                Error::new(message::HOST_COMMAND_NAME_DUPLICATED),
+            );
+        }
+    }
+
+    if report.is_empty() {
+        Ok(())
+    } else {
+        Err(report)
+    }
 }
 
 pub(super) fn validate_schema_version(value: &u32, _: &()) -> garde::Result {
@@ -33,5 +54,13 @@ pub(super) fn validate_required_text(value: &str, _: &()) -> garde::Result {
         Err(Error::new(message::VALUE_MUST_NOT_BE_BLANK))
     } else {
         Ok(())
+    }
+}
+
+pub(super) fn validate_absolute_executable(value: &Path, _: &()) -> garde::Result {
+    if value.is_absolute() {
+        Ok(())
+    } else {
+        Err(Error::new(message::HOST_EXECUTABLE_MUST_BE_ABSOLUTE))
     }
 }

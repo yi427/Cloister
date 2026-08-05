@@ -4,6 +4,7 @@ use std::{
     error::Error,
     fmt,
     num::{NonZeroU16, NonZeroU64},
+    path::PathBuf,
     str::FromStr,
 };
 
@@ -12,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 4;
+pub const PROFILE_SCHEMA_VERSION: u32 = 5;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -30,6 +31,8 @@ pub struct Profile {
     pub network: NetworkProfile,
     #[garde(skip)]
     pub agent: AgentProfile,
+    #[garde(dive)]
+    pub host: HostProfile,
 }
 
 /// OCI image selection for the guest environment.
@@ -161,7 +164,7 @@ impl<'de> Deserialize<'de> for MemorySize {
     }
 }
 
-/// Reason a memory size could not be represented by Profile V4.
+/// Reason a memory size could not be represented by the current Profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParseMemorySizeError {
     InvalidFormat,
@@ -208,6 +211,61 @@ pub struct AgentProfile {
 pub enum AgentState {
     Isolated,
     Shared,
+}
+
+/// Host capabilities made available to supported agents.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
+pub struct HostProfile {
+    #[garde(dive)]
+    pub exec: HostExecProfile,
+}
+
+/// Profile-governed host command policy.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
+pub struct HostExecProfile {
+    #[garde(skip)]
+    pub enabled: bool,
+    #[garde(skip)]
+    pub environment: HostExecEnvironmentProfile,
+    #[garde(dive)]
+    pub allow: Vec<HostExecAllowProfile>,
+}
+
+/// Environment policy for authorized host commands.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostExecEnvironmentProfile {
+    pub mode: HostExecEnvironmentMode,
+}
+
+/// Environment modes supported by Profile V5.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostExecEnvironmentMode {
+    InheritAll,
+}
+
+/// One allowlisted host executable.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
+pub struct HostExecAllowProfile {
+    #[garde(custom(super::validation::validate_required_text))]
+    pub name: String,
+    #[garde(custom(super::validation::validate_absolute_executable))]
+    pub executable: PathBuf,
+    #[garde(custom(super::validation::validate_required_text))]
+    pub description: String,
+    #[garde(skip)]
+    pub arguments: HostExecArguments,
+}
+
+/// Argument policies supported by Profile V5.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HostExecArguments {
+    Any,
 }
 
 #[cfg(test)]

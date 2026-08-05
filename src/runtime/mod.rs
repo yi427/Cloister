@@ -11,4 +11,6 @@ pub use apple_container::{
     system_status_command,
 };
 pub use executor::{RuntimeExecutionError, execute, execute_output};
-pub use plan::{AgentStateMount, CommandSpec, NetworkExposure, RuntimePlan, WorkspaceMount};
+pub use plan::{
+    AgentStateMount, CommandSpec, HostCommandPlan, NetworkExposure, RuntimePlan, WorkspaceMount,
+};

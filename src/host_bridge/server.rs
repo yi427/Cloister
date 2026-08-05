@@ -1,6 +1,6 @@
 //! Authenticated Streamable HTTP MCP server.
 
-use std::{error::Error, fmt, io};
+use std::{error::Error, fmt, io, path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
@@ -24,18 +24,20 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::message;
 
-use super::{BridgeToken, tools};
+use super::{BridgeToken, HostExecPolicy, tools};
 
 const ALLOWED_MCP_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "host.container.internal"];
 const REQUIRES_USER_INTERACTION: &str = "anthropic/requiresUserInteraction";
 
 #[derive(Clone, Debug)]
 struct HostBridgeService {
+    policy: Arc<HostExecPolicy>,
+    working_directory: Arc<PathBuf>,
     tool_router: ToolRouter<Self>,
 }
 
 impl HostBridgeService {
-    fn new() -> Self {
+    fn new(policy: Arc<HostExecPolicy>, working_directory: Arc<PathBuf>) -> Self {
         let mut tool_router = Self::tool_router();
         let host_exec = tool_router
             .map
@@ -48,31 +50,45 @@ impl HostBridgeService {
         );
         host_exec.attr.meta = Some(metadata);
 
-        Self { tool_router }
+        Self {
+            policy,
+            working_directory,
+            tool_router,
+        }
     }
 }
 
 #[tool_router(router = tool_router)]
 impl HostBridgeService {
     #[tool(
+        name = "host.list_commands",
+        description = "List the host commands allowed by the immutable Cloister Profile policy",
+        annotations(read_only_hint = true)
+    )]
+    async fn host_list_commands(&self) -> Json<super::HostListCommandsOutput> {
+        Json(tools::host_list_commands(&self.policy))
+    }
+
+    #[tool(
         name = "host.exec",
-        description = "Execute an arbitrary shell command as the macOS user running the Cloister host bridge"
+        description = "Execute one Profile-allowed host command with a literal argument vector and no shell parsing"
     )]
     async fn host_exec(
         &self,
-        Parameters(input): Parameters<super::HostExecInput>,
+        Parameters(input): Parameters<super::HostExecRequest>,
     ) -> Result<Json<super::HostExecOutput>, String> {
         let started = std::time::Instant::now();
-        let result = tools::host_exec(&input.command).await;
+        let result = tools::host_exec(&self.policy, &input, &self.working_directory).await;
 
         match &result {
             Ok(output) => eprintln!(
-                "audit capability=host.exec outcome=completed exit_code={:?} duration_ms={}",
-                output.exit_code, output.duration_ms
+                "audit capability=host.exec command={:?} outcome=completed exit_code={:?} duration_ms={}",
+                input.command, output.exit_code, output.duration_ms
             ),
             Err(error) => eprintln!(
-                "audit capability=host.exec outcome=failed duration_ms={} error={error}",
-                started.elapsed().as_millis()
+                "audit capability=host.exec command={:?} outcome=failed duration_ms={} error={error}",
+                input.command,
+                started.elapsed().as_millis(),
             ),
         }
 
@@ -84,7 +100,7 @@ impl HostBridgeService {
 impl ServerHandler for HostBridgeService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Cloister exposes host.exec, which runs arbitrary shell commands with the permissions of the macOS user running this bridge.",
+            "Call host.list_commands before host.exec. host.exec runs only Profile-allowed executables, passes args literally without a shell, and still uses the permissions of the macOS user running this bridge.",
         )
     }
 }
@@ -93,6 +109,8 @@ impl ServerHandler for HostBridgeService {
 pub async fn serve(
     listener: TcpListener,
     token: BridgeToken,
+    policy: HostExecPolicy,
+    working_directory: PathBuf,
     cancellation: CancellationToken,
 ) -> Result<(), HostBridgeServerError> {
     let local_address = listener
@@ -103,10 +121,35 @@ pub async fn serve(
             address: local_address,
         });
     }
+    let configured_working_directory = working_directory;
+    let working_directory =
+        std::fs::canonicalize(&configured_working_directory).map_err(|source| {
+            HostBridgeServerError::WorkingDirectory {
+                path: configured_working_directory,
+                source,
+            }
+        })?;
+    if !working_directory.is_dir() {
+        return Err(HostBridgeServerError::WorkingDirectoryNotDirectory {
+            path: working_directory,
+        });
+    }
+    if working_directory.parent().is_none() {
+        return Err(HostBridgeServerError::WorkingDirectoryIsRoot {
+            path: working_directory,
+        });
+    }
 
+    let policy = Arc::new(policy);
+    let working_directory = Arc::new(working_directory);
     let service: StreamableHttpService<HostBridgeService, LocalSessionManager> =
         StreamableHttpService::new(
-            || Ok(HostBridgeService::new()),
+            move || {
+                Ok(HostBridgeService::new(
+                    Arc::clone(&policy),
+                    Arc::clone(&working_directory),
+                ))
+            },
             Default::default(),
             StreamableHttpServerConfig::default()
                 .with_allowed_hosts(ALLOWED_MCP_HOSTS)
@@ -148,6 +191,9 @@ async fn authorize(State(expected): State<BridgeToken>, request: Request, next: 
 pub enum HostBridgeServerError {
     InspectListener(io::Error),
     NonLoopback { address: std::net::SocketAddr },
+    WorkingDirectory { path: PathBuf, source: io::Error },
+    WorkingDirectoryNotDirectory { path: PathBuf },
+    WorkingDirectoryIsRoot { path: PathBuf },
     Serve(io::Error),
 }
 
@@ -162,6 +208,21 @@ impl fmt::Display for HostBridgeServerError {
                 "{}: {address}",
                 message::BRIDGE_NON_LOOPBACK_LISTEN
             ),
+            Self::WorkingDirectory { path, source } => write!(
+                formatter,
+                "failed to resolve Host Exec working directory '{}': {source}",
+                path.display()
+            ),
+            Self::WorkingDirectoryNotDirectory { path } => write!(
+                formatter,
+                "Host Exec working directory is not a directory: '{}'",
+                path.display()
+            ),
+            Self::WorkingDirectoryIsRoot { path } => write!(
+                formatter,
+                "Host Exec working directory must not be the filesystem root: '{}'",
+                path.display()
+            ),
             Self::Serve(source) => write!(formatter, "{}: {source}", message::BRIDGE_SERVE_FAILED),
         }
     }
@@ -170,28 +231,45 @@ impl fmt::Display for HostBridgeServerError {
 impl Error for HostBridgeServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::InspectListener(source) | Self::Serve(source) => Some(source),
-            Self::NonLoopback { .. } => None,
+            Self::InspectListener(source)
+            | Self::WorkingDirectory { source, .. }
+            | Self::Serve(source) => Some(source),
+            Self::NonLoopback { .. }
+            | Self::WorkingDirectoryNotDirectory { .. }
+            | Self::WorkingDirectoryIsRoot { .. } => None,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{HostBridgeService, REQUIRES_USER_INTERACTION};
+    use crate::host_bridge::{HostEnvironment, HostExecPolicy};
 
     #[test]
-    fn exposes_only_the_host_exec_tool() {
-        let service = HostBridgeService::new();
-        let tools = service.tool_router.list_all();
+    fn exposes_discovery_and_structured_execution_tools() {
+        let policy = HostExecPolicy::new([], HostEnvironment::new())
+            .expect("empty test policy should build");
+        let service = HostBridgeService::new(
+            Arc::new(policy),
+            Arc::new(std::env::current_dir().expect("current directory should resolve")),
+        );
+        let mut tools = service.tool_router.list_all();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
         let names = tools
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, ["host.exec"]);
+        assert_eq!(names, ["host.exec", "host.list_commands"]);
+        let host_exec = tools
+            .iter()
+            .find(|tool| tool.name == "host.exec")
+            .expect("host.exec should be present");
         assert_eq!(
-            tools[0]
+            host_exec
                 .meta
                 .as_ref()
                 .and_then(|metadata| metadata.0.get(REQUIRES_USER_INTERACTION)),

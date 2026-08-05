@@ -85,22 +85,29 @@ as `CLAUDE_CONFIG_DIR`. Cloister creates only the selected agent's directory
 with owner-only permissions. It never mounts the host's existing `~/.codex` or
 `~/.claude`.
 
-Each command also starts an authenticated MCP bridge on macOS loopback and
-injects it into the selected agent as `cloister_host`. Its only tool,
-`host.exec`, runs an arbitrary command as the macOS user running Cloister.
-Codex receives transient `--config` values that require the server, allow only
-`host.exec`, and request per-call approval. Claude receives a transient inline
-`--mcp-config`; the server is loaded eagerly, and `host.exec` carries Claude's
-`anthropic/requiresUserInteraction` metadata so the pinned Claude Code build
-requires a human prompt for every call. The bearer token exists only for the
-process lifecycle, is forwarded by environment-variable name, and is never
+When `[host.exec] enabled = true`, each command also starts an authenticated MCP
+bridge on macOS loopback and injects it into the selected agent as
+`cloister_host`. `host.list_commands` reports the immutable Profile allowlist,
+argument policy, and inherited environment variable names without values.
+`host.exec` accepts structured `version`, `command`, and `args` fields, resolves
+the executable only from that allowlist, and passes arguments directly without
+a shell. The initial connected implementation waits synchronously for the
+process result; asynchronous status and cancellation remain a later slice.
+
+Codex receives transient `--config` values that require the server, enable only
+`host.list_commands` and `host.exec`, and request per-call approval. Claude
+receives a transient inline `--mcp-config`; the server is
+loaded eagerly, and only `host.exec` carries Claude's
+`anthropic/requiresUserInteraction` metadata. The bearer token exists only for
+the process lifecycle, is forwarded by environment-variable name, and is never
 printed, persisted in an agent configuration file, or mounted as a file.
 
 The prompt is an agent interaction policy, not a guest-process security
 boundary. The token is available to the agent process and may be inherited by
 processes it starts. A guest process that obtains the token can call the bridge
-directly without an agent approval prompt. Enabling the bridge by default
-therefore deliberately grants the guest a path to the macOS user's authority.
+directly without an agent approval prompt, but every execution is still checked
+against the immutable server-side Profile policy. Allowed interpreters and build
+tools may themselves provide broad macOS user authority.
 
 Apple `container` must have a localhost DNS domain that forwards the guest name
 to macOS loopback. Create it once with:
@@ -151,10 +158,15 @@ cargo run -- init
 ```
 
 `init` asks for the Profile name, exact image reference, guest CPU and memory
-limits, and whether agent credentials, settings, and session history should
-persist across projects. The policy applies to every supported agent while each
-agent keeps a separate Cloister-managed state directory. Its release-image
-default is derived from the CLI version, for example
+limits, whether agent credentials, settings, and session history should persist
+across projects, and an optional comma-separated list of host command names.
+The policy applies to every supported agent while each agent keeps a separate
+Cloister-managed state directory. The Host Exec allowlist is empty by default.
+Only names explicitly entered by the user are resolved from absolute directories
+in the current `PATH`; `init` invokes neither a shell nor `which`, and shows both
+the selected path and its canonical target before confirmation. Each selected
+command is stored with `arguments = "any"` in the enabled `inherit-all` policy.
+Its release-image default is derived from the CLI version, for example
 `ghcr.io/yi427/cloister:0.1.0`. A source checkout can explicitly select the
 locally built `cloister:dev` image instead.
 
@@ -182,12 +194,16 @@ cargo run -- check
 ```
 
 The separate `check` command is read-only. It validates the selected Profile,
-confirms that the Apple `container` service is running, verifies that the
-Profile's exact image reference has a compatible Linux ARM64 variant, and
-checks that `host.container.internal` is configured. It does not start the
-runtime, pull or build an image, create the DNS mapping, or change the Profile.
-Every applicable check is reported, and the command exits unsuccessfully if any
-check fails.
+inspects every declared Host Exec path and its canonical target, confirms that
+each target is a regular file with an execute permission bit, confirms that the
+Apple `container` service is running, verifies that the Profile's exact image
+reference has a compatible Linux ARM64 variant, and checks that
+`host.container.internal` is configured. When a declared executable is stale,
+`check` may show a replacement found in an absolute directory from the current
+`PATH`, but it never rewrites the Profile. It does not start the runtime, pull
+or build an image, create the DNS mapping, or change the Profile. Every
+applicable check is reported, and the command exits unsuccessfully if any check
+fails.
 
 Select a non-default Profile explicitly when needed:
 
@@ -198,12 +214,15 @@ cargo run -- check --profile examples/profile.toml
 `cloister profile check <path>` remains the narrower static Profile validation
 command; it does not inspect the host runtime, image store, or DNS setup.
 
-`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. Profile V4 uses
+`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. Profile V5 uses
 `[agent] state = "shared"` or `"isolated"`. The latter selects temporary
 per-container state instead of cross-project persistent state. Shared state can
 contain authentication tokens, configuration, history, and skills, so it must
-be treated as a secret. Profile V3 and its former `[codex]` table are rejected;
-there is no compatibility or automatic migration layer during development.
+be treated as a secret. Profile V5 also requires an explicit `[host.exec]`
+allowlist contract with `inherit-all` environment semantics. It is parsed and
+validated before launch and enforced independently by the Host MCP server on
+every execution request. Earlier Profile versions are rejected; there is no
+compatibility or automatic migration layer during development.
 
 Workspace selection is intentionally not part of the Profile. Both agent
 commands mount the current directory at `/workspace` by default. Select another
@@ -226,7 +245,8 @@ token path:
 ```sh
 cargo run -- host serve \
   --listen 127.0.0.1:17834 \
-  --token-file /private/tmp/cloister-bridge.token
+  --token-file /private/tmp/cloister-bridge.token \
+  --profile examples/profile.toml
 ```
 
 Exercise it from another process:
@@ -235,13 +255,24 @@ Exercise it from another process:
 cargo run -- host exec \
   --endpoint http://127.0.0.1:17834/mcp \
   --token-file /private/tmp/cloister-bridge.token \
-  'xcodebuild -version'
+  xcodebuild -- -version
 ```
 
 The token is generated with owner-only permissions and is never printed.
-The bridge refuses non-loopback listeners. `host.exec` deliberately allows
-arbitrary commands with the permissions of the macOS user running Cloister;
-using it gives the guest an escape hatch from the container boundary.
+The bridge refuses non-loopback listeners. `host.exec` runs only a command in
+the selected Profile allowlist, but that command still has the permissions of
+the macOS user running Cloister and remains an explicit escape hatch from the
+container boundary.
+
+The active policy design and remaining asynchronous work are documented in
+[`ADR 0004`](docs/adr/0004-profile-governed-host-execution.md). It defines a
+Profile-governed executable allowlist, command discovery, structured argv,
+controlled environment inheritance, asynchronous execution status and
+cancellation, and JSONL auditing. The allowlist, discovery, structured direct
+execution, and environment inheritance are connected now. Status, cancellation,
+dynamic schema enumeration, the canonical Skill, and persistent JSONL auditing
+remain to be implemented. [`ADR 0002`](docs/adr/0002-host-capability-bridge.md)
+now records the superseded arbitrary-shell bridge.
 
 ## Project layout
 

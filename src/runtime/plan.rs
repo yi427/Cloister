@@ -15,6 +15,7 @@ pub struct RuntimePlan {
     pub(super) workspace: WorkspaceMount,
     pub(super) agent_state: Option<AgentStateMount>,
     pub(super) host_bridge_endpoint: Option<String>,
+    pub(super) host_commands: Vec<HostCommandPlan>,
     pub(super) command: CommandSpec,
 }
 
@@ -41,6 +42,10 @@ impl RuntimePlan {
 
     pub fn host_bridge_endpoint(&self) -> Option<&str> {
         self.host_bridge_endpoint.as_deref()
+    }
+
+    pub fn host_commands(&self) -> &[HostCommandPlan] {
+        &self.host_commands
     }
 
     pub fn command(&self) -> &CommandSpec {
@@ -77,8 +82,22 @@ impl fmt::Display for RuntimePlan {
             writeln!(formatter, "Host bridge: {endpoint}")?;
             writeln!(
                 formatter,
-                "Host capability: host.exec (arbitrary macOS user commands)"
+                "Host capabilities: host.list_commands, host.exec (Profile-governed; macOS user permissions)"
             )?;
+            writeln!(
+                formatter,
+                "Host policy: inherit-all environment, {} allowed command(s)",
+                self.host_commands.len()
+            )?;
+            for command in &self.host_commands {
+                writeln!(
+                    formatter,
+                    "  {}: declared '{}', resolved '{}', arguments any",
+                    command.name,
+                    command.declared.display(),
+                    command.resolved.display()
+                )?;
+            }
             writeln!(formatter, "{} MCP approval: prompt", self.agent_name)?;
             writeln!(
                 formatter,
@@ -105,6 +124,28 @@ impl fmt::Display for RuntimePlan {
         }
 
         Ok(())
+    }
+}
+
+/// Non-secret Host Exec command details rendered in a runtime plan.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostCommandPlan {
+    pub(super) name: String,
+    pub(super) declared: PathBuf,
+    pub(super) resolved: PathBuf,
+}
+
+impl HostCommandPlan {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn declared(&self) -> &Path {
+        &self.declared
+    }
+
+    pub fn resolved(&self) -> &Path {
+        &self.resolved
     }
 }
 

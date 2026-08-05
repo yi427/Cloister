@@ -1,4 +1,4 @@
-schema_version = 4
+schema_version = 5
 name = "rust-default"
 
 [image]
@@ -17,3 +17,15 @@ mode = "default"
 
 [agent]
 state = "isolated"
+
+[host.exec]
+enabled = true
+
+[host.exec.environment]
+mode = "inherit-all"
+
+[[host.exec.allow]]
+name = "xcodebuild"
+executable = "/usr/bin/xcodebuild"
+description = "Build and test Xcode projects"
+arguments = "any"

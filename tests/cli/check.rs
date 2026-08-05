@@ -1,10 +1,11 @@
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
-    path::Path,
+    os::unix::fs::{PermissionsExt, symlink},
+    path::{Path, PathBuf},
     process::{Command, Output},
 };
 
+use cloister::profile::{HostExecAllowProfile, HostExecArguments, Profile, load_profile};
 use tempfile::tempdir;
 
 const HEALTHY_RUNTIME: &str = r#"#!/bin/sh
@@ -40,6 +41,10 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("[PASS] Profile: 'default'"));
+    assert!(
+        stdout
+            .contains("[PASS] Host policy: enabled, environment inherit-all, 0 allowed command(s)")
+    );
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
     assert!(stdout.contains("[PASS] Image: 'cloister:dev' (linux/arm64)"));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
@@ -56,8 +61,9 @@ fn accepts_an_explicit_profile_path() {
     let home = directory.path().join("home");
     let project = directory.path().join("project");
     let bin = directory.path().join("bin");
-    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml");
+    let profile = home.join("explicit.toml");
     fs::create_dir_all(&project).expect("project should be created");
+    write_profile(&profile, None);
     write_runtime(&bin, HEALTHY_RUNTIME);
 
     let output = run(
@@ -90,10 +96,72 @@ fn continues_with_independent_checks_when_the_profile_is_missing() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("[FAIL] Profile: failed to read profile"));
+    assert!(stdout.contains("[SKIP] Host policy: Profile is unavailable"));
     assert!(stdout.contains("[PASS] Runtime:"));
     assert!(stdout.contains("[SKIP] Image: Profile is unavailable"));
     assert!(stdout.contains("[PASS] DNS:"));
-    assert!(stdout.ends_with("1 check(s) failed; 1 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 skipped.\n"));
+}
+
+#[test]
+fn reports_declared_and_resolved_host_command_paths() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let target = directory.path().join("tool-target");
+    let declared = directory.path().join("tool");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_executable(&target);
+    symlink(&target, &declared).expect("tool symlink should be created");
+    write_profile(
+        &default_profile_path(&home),
+        Some(("tool", declared.clone())),
+    );
+    write_runtime(&bin, HEALTHY_RUNTIME);
+
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    let resolved_target = fs::canonicalize(&target).expect("tool target should canonicalize");
+    assert!(stdout.contains(&format!(
+        "[PASS] Host command: 'tool': declared '{}', resolved '{}'",
+        declared.display(),
+        resolved_target.display()
+    )));
+}
+
+#[test]
+fn suggests_a_current_path_match_without_rewriting_the_profile() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let profile_path = default_profile_path(&home);
+    let missing = directory.path().join("old-bin/tool");
+    let replacement = bin.join("tool");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_profile(&profile_path, Some(("tool", missing.clone())));
+    write_runtime(&bin, HEALTHY_RUNTIME);
+    write_executable(&replacement);
+    let original = fs::read(&profile_path).expect("Profile should be readable");
+
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout.contains("[FAIL] Host command: 'tool': failed to resolve host executable"));
+    assert!(stdout.contains(&format!(
+        "Current PATH finds 'tool' at '{}'",
+        replacement.display()
+    )));
+    assert!(stdout.contains("update this Profile entry explicitly"));
+    assert_eq!(
+        fs::read(&profile_path).expect("Profile should remain readable"),
+        original,
+        "check must not rewrite stale command paths"
+    );
 }
 
 #[test]
@@ -167,14 +235,39 @@ fn write_runtime(bin: &Path, contents: &str) {
 }
 
 fn write_default_profile(home: &Path) {
-    let config = home.join(".config/cloister/profile.toml");
-    fs::create_dir_all(config.parent().expect("config should have a parent"))
+    write_profile(&default_profile_path(home), None);
+}
+
+fn default_profile_path(home: &Path) -> PathBuf {
+    home.join(".config/cloister/profile.toml")
+}
+
+fn write_profile(path: &Path, command: Option<(&str, PathBuf)>) {
+    let mut profile: Profile =
+        load_profile(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"))
+            .expect("example Profile should load");
+    profile.host.exec.allow.clear();
+    if let Some((name, executable)) = command {
+        profile.host.exec.allow.push(HostExecAllowProfile {
+            name: name.to_owned(),
+            executable,
+            description: format!("Run {name}"),
+            arguments: HostExecArguments::Any,
+        });
+    }
+
+    fs::create_dir_all(path.parent().expect("Profile should have a parent"))
         .expect("config directory should be created");
-    fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"),
-        config,
-    )
-    .expect("default profile should be written");
+    let source = toml::to_string_pretty(&profile).expect("Profile should serialize");
+    fs::write(path, source).expect("Profile should be written");
+}
+
+fn write_executable(path: &Path) {
+    fs::create_dir_all(path.parent().expect("executable should have a parent"))
+        .expect("executable parent should be created");
+    fs::write(path, "test executable\n").expect("executable should be written");
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .expect("executable permissions should be set");
 }
 
 fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[&str]) -> Output {

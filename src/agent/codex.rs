@@ -49,7 +49,7 @@ impl AgentAdapter for CodexAgent {
             );
             push_config(
                 &mut command_arguments,
-                "mcp_servers.cloister_host.enabled_tools=[\"host.exec\"]",
+                "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\"]",
             );
             push_config(
                 &mut command_arguments,

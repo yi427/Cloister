@@ -1,9 +1,10 @@
 //! Read-only readiness checks for the natural agent workflow.
 
-use std::{path::PathBuf, process::ExitCode};
+use std::{env, path::PathBuf, process::ExitCode};
 
 use crate::{
     error::message,
+    preflight::{inspect_host_executable, resolve_host_command},
     profile::{Architecture, Profile, load_profile},
     runtime::{
         CommandSpec, HOST_BRIDGE_GUEST_NAME, RuntimeExecutionError, dns_list_command,
@@ -17,7 +18,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct CheckArgs {
-    /// Path to a Profile V4 TOML file.
+    /// Path to a Profile V5 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -34,6 +35,10 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
     let mut report = CheckReport::default();
 
     let profile = check_profile(profile_path, &mut report);
+    match &profile {
+        Some(profile) => check_host_policy(profile, &mut report),
+        None => report.skip("Host policy", "Profile is unavailable"),
+    }
     let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
 
     match (&profile, runtime_ready) {
@@ -51,6 +56,51 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
     }
 
     report.finish()
+}
+
+fn check_host_policy(profile: &Profile, report: &mut CheckReport) {
+    let policy = &profile.host.exec;
+    let state = if policy.enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
+    report.pass(
+        "Host policy",
+        format!(
+            "{state}, environment inherit-all, {} allowed command(s)",
+            policy.allow.len()
+        ),
+    );
+
+    let path = env::var_os("PATH");
+    for command in &policy.allow {
+        match inspect_host_executable(&command.executable) {
+            Ok(executable) => report.pass(
+                "Host command",
+                format!(
+                    "'{}': declared '{}', resolved '{}'",
+                    command.name,
+                    executable.declared().display(),
+                    executable.resolved().display()
+                ),
+            ),
+            Err(error) => {
+                let mut detail = format!("'{}': {error}", command.name);
+                if let Some(file_name) = command.executable.file_name()
+                    && let Ok(replacement) = resolve_host_command(file_name, path.as_deref())
+                {
+                    detail.push_str(&format!(
+                        "\nCurrent PATH finds '{}' at '{}' (resolved as '{}'); update this Profile entry explicitly.",
+                        file_name.to_string_lossy(),
+                        replacement.declared().display(),
+                        replacement.resolved().display()
+                    ));
+                }
+                report.fail("Host command", detail);
+            }
+        }
+    }
 }
 
 fn check_profile(path: Option<PathBuf>, report: &mut CheckReport) -> Option<Profile> {

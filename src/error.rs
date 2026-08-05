@@ -15,6 +15,9 @@ pub(crate) mod message {
 
     pub const UNSUPPORTED_SCHEMA_VERSION: &str = "schema_version is not supported";
     pub const VALUE_MUST_NOT_BE_BLANK: &str = "must not be blank";
+    pub const HOST_EXECUTABLE_MUST_BE_ABSOLUTE: &str =
+        "host command executable must be an absolute path";
+    pub const HOST_COMMAND_NAME_DUPLICATED: &str = "host command name must be unique";
     pub const MOUNT_PATH_CONTAINS_SEPARATOR: &str = "bind mount paths must not contain ','";
     pub const RUNTIME_START_FAILED: &str = "failed to start runtime";
     pub const SHARED_AGENT_STATE_MISSING: &str = "state requires a Cloister-managed host directory";
@@ -41,7 +44,6 @@ pub(crate) mod message {
     pub const BRIDGE_SIGNAL_FAILED: &str = "failed to wait for shutdown signal";
     pub const BRIDGE_CLIENT_FAILED: &str = "host bridge request failed";
     pub const BRIDGE_RESPONSE_INVALID: &str = "host bridge returned an invalid response";
-    pub const BRIDGE_REQUEST_TIMED_OUT: &str = "host bridge request timed out";
-    pub const HOST_EXEC_SPAWN_FAILED: &str = "failed to start the host shell";
+    pub const HOST_EXEC_SPAWN_FAILED: &str = "failed to start authorized host command";
     pub const HOST_EXEC_FAILED: &str = "host command failed";
 }

@@ -67,7 +67,8 @@ Profiles are versioned TOML documents. The current schema covers:
 - CPU and memory limits;
 - guest user, locale, and timezone;
 - network policy;
-- agent state policy.
+- agent state policy; and
+- explicit host-command policy.
 
 ADR 0003 later moved workspace selection out of the Profile. The CLI selects a
 host directory for each invocation and mounts it at `/workspace`.

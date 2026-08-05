@@ -1,6 +1,6 @@
 //! Small MCP client used to exercise the host bridge from the CLI.
 
-use std::{error::Error, fmt, time::Duration};
+use std::{error::Error, fmt};
 
 use rmcp::{
     ServiceExt,
@@ -9,29 +9,46 @@ use rmcp::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
+use serde::de::DeserializeOwned;
 
 use crate::error::message;
 
-use super::{BridgeToken, HostExecOutput};
+use super::{BridgeToken, HostExecOutput, HostExecRequest, HostListCommandsOutput};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Calls `host.exec` through an authenticated MCP endpoint.
+/// Calls structured `host.exec` through an authenticated MCP endpoint.
 pub async fn call_host_exec(
     endpoint: &str,
     token: &BridgeToken,
-    command: &str,
+    request: &HostExecRequest,
 ) -> Result<HostExecOutput, HostBridgeClientError> {
-    tokio::time::timeout(REQUEST_TIMEOUT, call(endpoint, token, command))
-        .await
-        .map_err(|_| HostBridgeClientError::Timeout)?
+    let arguments = serde_json::to_value(request)
+        .expect("HostExecRequest should serialize")
+        .as_object()
+        .cloned()
+        .expect("host.exec arguments are an object");
+    call_tool(endpoint, token, "host.exec", arguments).await
 }
 
-async fn call(
+/// Calls read-only `host.list_commands` through an authenticated MCP endpoint.
+pub async fn call_host_list_commands(
     endpoint: &str,
     token: &BridgeToken,
-    command: &str,
-) -> Result<HostExecOutput, HostBridgeClientError> {
+) -> Result<HostListCommandsOutput, HostBridgeClientError> {
+    call_tool(
+        endpoint,
+        token,
+        "host.list_commands",
+        serde_json::Map::new(),
+    )
+    .await
+}
+
+async fn call_tool<T: DeserializeOwned>(
+    endpoint: &str,
+    token: &BridgeToken,
+    tool: &str,
+    arguments: serde_json::Map<String, serde_json::Value>,
+) -> Result<T, HostBridgeClientError> {
     let transport = StreamableHttpClientTransport::from_config(
         StreamableHttpClientTransportConfig::with_uri(endpoint.to_owned())
             .auth_header(token.secret().to_owned()),
@@ -42,12 +59,8 @@ async fn call(
             .map_err(|error| HostBridgeClientError::Transport {
                 detail: error.to_string(),
             })?;
-    let arguments = serde_json::json!({ "command": command })
-        .as_object()
-        .cloned()
-        .expect("host.exec arguments are an object");
     let result = client
-        .call_tool(CallToolRequestParams::new("host.exec").with_arguments(arguments))
+        .call_tool(CallToolRequestParams::new(tool.to_owned()).with_arguments(arguments))
         .await
         .map_err(|error| HostBridgeClientError::Transport {
             detail: error.to_string(),
@@ -74,7 +87,6 @@ async fn call(
 /// Failure while connecting to or invoking the host bridge.
 #[derive(Debug)]
 pub enum HostBridgeClientError {
-    Timeout,
     Transport { detail: String },
     Tool { detail: String },
     InvalidResponse,
@@ -83,7 +95,6 @@ pub enum HostBridgeClientError {
 impl fmt::Display for HostBridgeClientError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Timeout => formatter.write_str(message::BRIDGE_REQUEST_TIMED_OUT),
             Self::Transport { detail } | Self::Tool { detail } => {
                 write!(formatter, "{}: {detail}", message::BRIDGE_CLIENT_FAILED)
             }

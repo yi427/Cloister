@@ -1,6 +1,7 @@
-schema_version = 4
+schema_version = 5
 name = "invalid-memory"
 image = { reference = "cloister:dev", architecture = "arm64" }
 guest = { cpus = 4, memory = "hello", user = "cloister", locale = "en_US.UTF-8", timezone = "America/New_York" }
 network = { mode = "default" }
 agent = { state = "isolated" }
+host = { exec = { enabled = true, environment = { mode = "inherit-all" }, allow = [] } }
