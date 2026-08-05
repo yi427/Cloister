@@ -17,10 +17,11 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     error::message,
     host_bridge::{
-        BridgeToken, BridgeTokenError, HOST_EXEC_DSL_VERSION, HostBridgeClientError,
-        HostBridgeServerError, HostExecPolicy, HostExecPolicyBuildError, HostExecRequest,
-        HostExecStatusRequest, HostExecutionState, HostOutputChunk, HostOutputStream,
-        call_host_exec, call_host_exec_status, serve,
+        AuditLogPathError, BridgeToken, BridgeTokenError, HOST_EXEC_DSL_VERSION,
+        HostBridgeClientError, HostBridgeContext, HostBridgeServerError, HostExecPolicy,
+        HostExecPolicyBuildError, HostExecRequest, HostExecStatusRequest, HostExecutionState,
+        HostOutputChunk, HostOutputStream, call_host_exec, call_host_exec_status,
+        default_audit_log_path, serve,
     },
     preflight::{
         HostExecutableCheckError, PreflightError, inspect_host_executable, resolve_launch,
@@ -119,6 +120,7 @@ async fn serve_command(
     let policy =
         HostExecPolicy::from_profile(&resolved.profile().host.exec, env::vars_os().collect())?
             .ok_or(HostCommandError::HostExecDisabled)?;
+    let audit_log_path = default_audit_log_path()?;
     let token = BridgeToken::load_or_create(&token_file)?;
     let listener = TcpListener::bind(listen)
         .await
@@ -142,6 +144,10 @@ async fn serve_command(
     );
     println!("Working directory: {}", resolved.workspace().display());
     println!("Token file: {}", token_file.display());
+    println!(
+        "Audit log: {} (JSONL, owner-only, 20 MiB total)",
+        audit_log_path.display()
+    );
     println!("Tools: host.list_commands, host.exec, host.exec_status, host.exec_cancel");
     println!("Allowed commands: {}", policy.command_count());
 
@@ -149,7 +155,12 @@ async fn serve_command(
         listener,
         token,
         policy,
-        resolved.workspace().to_owned(),
+        HostBridgeContext::new(
+            resolved.profile().name.clone(),
+            "manual",
+            resolved.workspace().to_owned(),
+            audit_log_path,
+        ),
         cancellation.clone(),
     );
     tokio::pin!(server);
@@ -229,6 +240,7 @@ fn print_chunks(chunks: &[HostOutputChunk]) -> io::Result<()> {
 
 #[derive(Debug)]
 pub(super) enum HostCommandError {
+    AuditPath(AuditLogPathError),
     Token(BridgeTokenError),
     HomeDirectoryMissing,
     Load(LoadProfileError),
@@ -262,6 +274,7 @@ pub(super) enum HostCommandError {
 impl fmt::Display for HostCommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AuditPath(error) => error.fmt(formatter),
             Self::Token(error) => error.fmt(formatter),
             Self::HomeDirectoryMissing => formatter.write_str(message::HOME_DIRECTORY_MISSING),
             Self::Load(error) => error.fmt(formatter),
@@ -307,6 +320,7 @@ impl fmt::Display for HostCommandError {
 impl Error for HostCommandError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::AuditPath(error) => Some(error),
             Self::Token(error) => Some(error),
             Self::Load(error) => Some(error),
             Self::Policy(error) => Some(error),
@@ -329,6 +343,12 @@ impl Error for HostCommandError {
 impl From<BridgeTokenError> for HostCommandError {
     fn from(error: BridgeTokenError) -> Self {
         Self::Token(error)
+    }
+}
+
+impl From<AuditLogPathError> for HostCommandError {
+    fn from(error: AuditLogPathError) -> Self {
+        Self::AuditPath(error)
     }
 }
 

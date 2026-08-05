@@ -42,6 +42,11 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("[PASS] Profile: 'default'"));
     assert!(stdout.contains("[PASS] Guest proxy: disabled by Profile"));
+    assert!(stdout.contains(&format!(
+        "[PASS] Host audit: {} (not created yet; JSONL, owner-only, 20 MiB total)",
+        home.join(".local/state/cloister/audit/host-exec.jsonl")
+            .display()
+    )));
     assert!(
         stdout
             .contains("[PASS] Host policy: enabled, environment inherit-all, 0 allowed command(s)")
@@ -53,6 +58,41 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(
         !home.join(".local/share/cloister/agents/codex").exists(),
         "check must not create agent state"
+    );
+    assert!(
+        !home.join(".local/state/cloister").exists(),
+        "check must not create audit state"
+    );
+}
+
+#[test]
+fn rejects_unsafe_existing_audit_permissions_without_repairing_them() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let audit_root = home.join(".local/state/cloister");
+    fs::create_dir_all(&project).expect("project should be created");
+    fs::create_dir_all(&audit_root).expect("audit root should be created");
+    fs::set_permissions(&audit_root, fs::Permissions::from_mode(0o755))
+        .expect("unsafe permissions should be set");
+    write_default_profile(&home);
+    write_runtime(&bin, HEALTHY_RUNTIME);
+
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout.contains("[FAIL] Host audit: unsafe Host Exec audit permissions"));
+    assert!(stdout.contains("expected 0700, found 0755"));
+    assert_eq!(
+        fs::metadata(&audit_root)
+            .expect("audit root should remain")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755,
+        "check must not repair audit permissions"
     );
 }
 
@@ -101,7 +141,7 @@ fn continues_with_independent_checks_when_the_profile_is_missing() {
     assert!(stdout.contains("[PASS] Runtime:"));
     assert!(stdout.contains("[SKIP] Image: Profile is unavailable"));
     assert!(stdout.contains("[PASS] DNS:"));
-    assert!(stdout.ends_with("1 check(s) failed; 3 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 4 skipped.\n"));
 }
 
 #[test]
@@ -325,7 +365,8 @@ fn run_with_environment(
         .current_dir(current_directory)
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_DATA_HOME");
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME");
     for name in [
         "HTTP_PROXY",
         "HTTPS_PROXY",

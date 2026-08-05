@@ -26,9 +26,9 @@ The first connected slice now enforces the Profile allowlist, exposes
 inherits the complete trusted host environment, and starts the selected
 absolute executable directly without `/bin/zsh -lc`. The asynchronous execution
 manager, incremental status, cancellation, and process-group cleanup are now
-connected. Dynamic command enumeration in JSON Schema and the persistent JSONL
-audit log remain planned portions of this accepted design. The canonical Skill
-and its Codex and Claude discovery paths are connected.
+connected. Bounded persistent JSONL auditing is also connected. Dynamic command
+enumeration in JSON Schema remains a planned portion of this accepted design.
+The canonical Skill and its Codex and Claude discovery paths are connected.
 
 ## Decision summary
 
@@ -390,36 +390,55 @@ program. Such host-level containment is deferred.
 
 ## Audit log
 
-The bridge writes structured JSON Lines events on the host for allowed,
-denied, invalid, failed, cancelled, and completed execution attempts. Each
-event has an audit schema version and enough stable metadata to correlate the
-lifecycle:
+The bridge writes structured JSON Lines events on the host for authorized,
+policy-denied, process-start-failed, cancelled, failed, and completed execution
+attempts. Each event has an audit schema version and enough stable metadata to
+correlate the lifecycle:
 
 - timestamp, event kind, request ID, and execution ID when assigned;
-- agent, Profile name, and canonical workspace;
+- agent, Profile name, and the canonical workspace used as the initial working
+  directory;
 - allowlist command name and declared/resolved executable path;
 - argument count and whether argument values were redacted;
-- canonical initial working directory;
 - environment mode and variable names, never values;
-- outcome, exit code or signal, and duration;
+- outcome, exit code when available, and duration;
 - stdout and stderr byte counts; and
 - output truncation and configured-limit information.
 
-The first version does not persist raw argument values, stdout, stderr,
-environment values, bearer tokens, or agent credentials. Arbitrary arguments
-may contain secrets, and the bridge cannot reliably infer which positions are
-sensitive. A later Profile version may add an explicit per-command argument
-redaction contract.
+The audit schema is independently versioned at V1. The first version does not
+persist raw argument values, stdout, stderr, environment values, bearer tokens,
+or agent credentials. Arbitrary arguments may contain secrets, and the bridge
+cannot reliably infer which positions are sensitive. A later Profile version
+may add an explicit per-command argument redaction contract.
+
+The `execution_started` event is committed before spawning the host process so
+that audit failure prevents host side effects. A spawn failure therefore has a
+correlated `execution_started` event followed by `execution_failed`.
 
 `host.exec_status` output remains available only in the bounded in-memory job
-record. Audit-file location, owner-only permissions, rotation, and retention
-must be finalized before this ADR moves from Proposed to Accepted. The runtime
-plan must display the resolved audit destination without creating it during a
-dry run.
+record. The audit destination is
+`${XDG_STATE_HOME:-~/.local/state}/cloister/audit/host-exec.jsonl`. The
+`cloister` and `audit` directories must be owner-only directories with mode
+`0700`; the active log, rotated log, and lock file must be owner-only regular
+files with mode `0600` and exactly one hard link. Cloister rejects symbolic
+links, wrong ownership, and broader permissions rather than silently repairing
+existing paths. Existing segments larger than the per-file limit are also
+rejected rather than silently truncated.
+
+The active file and `host-exec.jsonl.1` are each limited to 10 MiB, for a total
+JSONL bound of 20 MiB. Rotation happens before an append would exceed the
+per-file limit. Multiple Bridge processes coordinate every size check, rotation,
+single-line append, and data flush with an inter-process lock. Bridge shutdown
+cleans up executions before draining and joining the audit writer. Dry runs and
+`check` resolve and display the path without creating it.
+
+These logs survive ordinary Bridge and machine restarts, but they are
+observational rather than tamper-proof. An allowed host command runs as the same
+macOS user and can modify or delete them.
 
 `host.list_commands` and status polling are not execution-attempt audit events.
-Authentication failures may be recorded separately without logging bearer
-values.
+Requests rejected by the HTTP Bearer-authentication middleware are not written
+to the V1 audit log, and bearer values are never logged.
 
 ## Canonical Skill behavior
 
@@ -470,7 +489,8 @@ description are generated explicitly for every selected entry.
 - current Profile Host Exec policy validity;
 - declared executable existence, canonical symlink resolution, regular-file
   type, and execute permission bits;
-- the audit directory's safe ownership and permissions when it exists; and
+- the audit directory and files' safe type, ownership, permissions, link count,
+  and per-segment size when they exist; and
 - explicit `inherit-all` environment mode.
 
 For a stale declared path, `check` may search the current `PATH` for the
@@ -521,6 +541,5 @@ filtering, per-project policy, host-level CPU or memory containment, network
 restrictions, persistent jobs, interactive stdin, PTY programs, or
 Profile-governed execution limits.
 
-The remaining decisions are the audit path, rotation and retention policy,
-dynamic command schema enumeration, and real Codex and Claude verification of
-the four-tool approval behavior.
+The remaining decisions are dynamic command schema enumeration and real Codex
+and Claude verification of the four-tool approval behavior.

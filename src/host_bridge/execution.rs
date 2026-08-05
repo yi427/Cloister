@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::message;
 
+use super::audit::{AuditExecutionMetadata, AuditLog};
 use super::{HostExecAuthorizationError, HostExecPolicy, HostExecRequest, build_host_process};
 
 const EXECUTION_ID_BYTES: usize = 16;
@@ -32,7 +33,7 @@ const CANCELLATION_KILL_WAIT: Duration = Duration::from_secs(1);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(4);
 const MAX_CONCURRENT_EXECUTIONS: usize = 8;
 const MAX_RETAINED_EXECUTIONS: usize = 128;
-const MAX_RETAINED_OUTPUT_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_RETAINED_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// Lifecycle state of one process registered with this bridge instance.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -110,6 +111,7 @@ pub struct HostExecCancelOutput {
 struct ExecutionRecord {
     execution_id: String,
     command_name: String,
+    audit_metadata: AuditExecutionMetadata,
     started: Instant,
     cancellation: CancellationToken,
     terminal: Notify,
@@ -129,10 +131,15 @@ struct ExecutionRecordState {
 }
 
 impl ExecutionRecord {
-    fn new(execution_id: String, command_name: String) -> Self {
+    fn new(
+        execution_id: String,
+        command_name: String,
+        audit_metadata: AuditExecutionMetadata,
+    ) -> Self {
         Self {
             execution_id,
             command_name,
+            audit_metadata,
             started: Instant::now(),
             cancellation: CancellationToken::new(),
             terminal: Notify::new(),
@@ -225,13 +232,15 @@ impl ExecutionRecord {
 pub(super) struct ExecutionManager {
     records: Mutex<HashMap<String, Arc<ExecutionRecord>>>,
     permits: Arc<Semaphore>,
+    audit: AuditLog,
 }
 
 impl ExecutionManager {
-    pub(super) fn new() -> Arc<Self> {
+    pub(super) fn new(audit: AuditLog) -> Arc<Self> {
         Arc::new(Self {
             records: Mutex::new(HashMap::new()),
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT_EXECUTIONS)),
+            audit,
         })
     }
 
@@ -241,15 +250,60 @@ impl ExecutionManager {
         request: &HostExecRequest,
         working_directory: &Path,
     ) -> Result<HostExecOutput, ExecutionError> {
-        let authorized = policy
-            .authorize(request)
-            .map_err(ExecutionError::Authorization)?;
-        let permit = Arc::clone(&self.permits).try_acquire_owned().map_err(|_| {
-            ExecutionError::Capacity {
-                limit: MAX_CONCURRENT_EXECUTIONS,
+        let request_id = generate_identifier("req_")?;
+        let authorized = match policy.authorize(request) {
+            Ok(authorized) => authorized,
+            Err(source) => {
+                self.audit
+                    .denied(
+                        request_id,
+                        request,
+                        match &source {
+                            HostExecAuthorizationError::UnsupportedVersion { .. } => {
+                                "unsupported_version"
+                            }
+                            HostExecAuthorizationError::CommandNotAllowed { .. } => {
+                                "command_not_allowed"
+                            }
+                        },
+                    )
+                    .await
+                    .map_err(ExecutionError::Audit)?;
+                return Err(ExecutionError::Authorization(source));
             }
-        })?;
-        let execution_id = generate_execution_id()?;
+        };
+        let permit = match Arc::clone(&self.permits).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                self.audit
+                    .failed(request_id, None, request, Some(&authorized), "capacity")
+                    .await
+                    .map_err(ExecutionError::Audit)?;
+                return Err(ExecutionError::Capacity {
+                    limit: MAX_CONCURRENT_EXECUTIONS,
+                });
+            }
+        };
+        let execution_id = match generate_identifier("exec_") {
+            Ok(execution_id) => execution_id,
+            Err(error) => {
+                self.audit
+                    .failed(request_id, None, request, Some(&authorized), "execution_id")
+                    .await
+                    .map_err(ExecutionError::Audit)?;
+                return Err(error);
+            }
+        };
+        let audit_metadata = self
+            .audit
+            .started(
+                request_id.clone(),
+                execution_id.clone(),
+                request,
+                &authorized,
+            )
+            .await
+            .map_err(ExecutionError::Audit)?;
         let command_name = authorized.command_name().to_owned();
         let mut process = build_host_process(&authorized);
         process
@@ -259,13 +313,43 @@ impl ExecutionManager {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
-        let mut child = process.spawn().map_err(|source| ExecutionError::Spawn {
-            command: command_name.clone(),
-            source,
-        })?;
-        let process_id = child.id().ok_or_else(|| ExecutionError::MissingProcessId {
-            command: command_name.clone(),
-        })?;
+        let mut child = match process.spawn() {
+            Ok(child) => child,
+            Err(source) => {
+                self.audit
+                    .failed(
+                        request_id,
+                        Some(execution_id),
+                        request,
+                        Some(&authorized),
+                        "spawn",
+                    )
+                    .await
+                    .map_err(ExecutionError::Audit)?;
+                return Err(ExecutionError::Spawn {
+                    command: command_name,
+                    source,
+                });
+            }
+        };
+        let process_id = match child.id() {
+            Some(process_id) => process_id,
+            None => {
+                self.audit
+                    .failed(
+                        request_id,
+                        Some(execution_id),
+                        request,
+                        Some(&authorized),
+                        "missing_process_id",
+                    )
+                    .await
+                    .map_err(ExecutionError::Audit)?;
+                return Err(ExecutionError::MissingProcessId {
+                    command: command_name,
+                });
+            }
+        };
         let stdout = child
             .stdout
             .take()
@@ -274,7 +358,11 @@ impl ExecutionManager {
             .stderr
             .take()
             .expect("piped host stderr should be available");
-        let record = Arc::new(ExecutionRecord::new(execution_id.clone(), command_name));
+        let record = Arc::new(ExecutionRecord::new(
+            execution_id.clone(),
+            command_name,
+            audit_metadata,
+        ));
         self.register(Arc::clone(&record));
 
         tokio::spawn(supervise(
@@ -284,6 +372,7 @@ impl ExecutionManager {
             stderr,
             Arc::clone(&record),
             permit,
+            self.audit.clone(),
         ));
 
         record.wait_until_terminal(INLINE_RESPONSE_WINDOW).await;
@@ -375,6 +464,7 @@ async fn supervise(
     stderr: impl AsyncRead + Unpin + Send + 'static,
     record: Arc<ExecutionRecord>,
     _permit: OwnedSemaphorePermit,
+    audit: AuditLog,
 ) {
     let stdout_task = tokio::spawn(read_output(
         stdout,
@@ -406,13 +496,22 @@ async fn supervise(
         Err(_) if cancelled => (HostExecutionState::Cancelled, None),
         Err(_) => (HostExecutionState::Failed, None),
     };
-    record.finish(state, exit_code);
-    let snapshot = record.snapshot(u64::MAX);
+    let mut snapshot = record.snapshot(u64::MAX);
+    snapshot.state = state;
+    snapshot.exit_code = exit_code;
+    if let Err(error) = audit.finished(&record.audit_metadata, &snapshot).await {
+        eprintln!(
+            "Host Exec audit failure execution_id={:?} command={:?}: {error}",
+            record.execution_id, record.command_name
+        );
+        snapshot.state = HostExecutionState::Failed;
+    }
+    record.finish(snapshot.state, exit_code);
     eprintln!(
         "audit capability=host.exec execution_id={:?} command={:?} outcome={:?} exit_code={:?} duration_ms={} stdout_bytes={} stderr_bytes={} output_truncated={}",
         record.execution_id,
         record.command_name,
-        state,
+        snapshot.state,
         exit_code,
         snapshot.duration_ms,
         snapshot.stdout_bytes,
@@ -513,12 +612,12 @@ fn signal_process_group(process_id: u32, signal: i32) -> io::Result<()> {
     }
 }
 
-fn generate_execution_id() -> Result<String, ExecutionError> {
+fn generate_identifier(prefix: &str) -> Result<String, ExecutionError> {
     let mut bytes = [0_u8; EXECUTION_ID_BYTES];
     getrandom::fill(&mut bytes).map_err(|source| ExecutionError::Random {
         detail: source.to_string(),
     })?;
-    Ok(format!("exec_{}", URL_SAFE_NO_PAD.encode(bytes)))
+    Ok(format!("{prefix}{}", URL_SAFE_NO_PAD.encode(bytes)))
 }
 
 fn elapsed_ms(started: Instant) -> u64 {
@@ -527,6 +626,7 @@ fn elapsed_ms(started: Instant) -> u64 {
 
 #[derive(Debug)]
 pub(super) enum ExecutionError {
+    Audit(super::AuditLogError),
     Authorization(HostExecAuthorizationError),
     Capacity { limit: usize },
     MissingProcessId { command: String },
@@ -538,6 +638,7 @@ pub(super) enum ExecutionError {
 impl fmt::Display for ExecutionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Audit(source) => source.fmt(formatter),
             Self::Authorization(source) => source.fmt(formatter),
             Self::Capacity { limit } => write!(
                 formatter,
@@ -573,6 +674,7 @@ impl fmt::Display for ExecutionError {
 impl Error for ExecutionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Audit(source) => Some(source),
             Self::Authorization(source) => Some(source),
             Self::Spawn { source, .. } => Some(source),
             Self::Capacity { .. }
@@ -587,14 +689,21 @@ impl Error for ExecutionError {
 mod tests {
     use std::sync::Arc;
 
+    use tempfile::tempdir;
+
     use super::{
         ExecutionManager, ExecutionRecord, HostExecutionState, HostOutputStream,
         MAX_RETAINED_EXECUTIONS, MAX_RETAINED_OUTPUT_BYTES,
     };
+    use crate::host_bridge::audit::{AuditController, AuditExecutionMetadata};
 
     #[test]
     fn retains_bounded_output_while_counting_all_raw_bytes() {
-        let record = ExecutionRecord::new("exec_output".to_owned(), "test".to_owned());
+        let record = ExecutionRecord::new(
+            "exec_output".to_owned(),
+            "test".to_owned(),
+            AuditExecutionMetadata::test("exec_output"),
+        );
         let output = vec![b'x'; MAX_RETAINED_OUTPUT_BYTES + 17];
 
         record.append_output(HostOutputStream::Stdout, &output);
@@ -607,25 +716,40 @@ mod tests {
         assert_eq!(snapshot.chunks[0].text.len(), MAX_RETAINED_OUTPUT_BYTES);
     }
 
-    #[test]
-    fn evicts_the_oldest_terminal_record_at_the_registry_limit() {
-        let manager = ExecutionManager::new();
+    #[tokio::test]
+    async fn evicts_the_oldest_terminal_record_at_the_registry_limit() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let audit = AuditController::start(
+            directory
+                .path()
+                .join("state/cloister/audit/host-exec.jsonl"),
+            "test".to_owned(),
+            "test-agent".to_owned(),
+            directory.path().to_owned(),
+        )
+        .expect("test audit should start");
+        let manager = ExecutionManager::new(audit.log());
         for index in 0..=MAX_RETAINED_EXECUTIONS {
             let record = Arc::new(ExecutionRecord::new(
                 format!("exec_{index}"),
                 "test".to_owned(),
+                AuditExecutionMetadata::test(&format!("exec_{index}")),
             ));
             record.finish(HostExecutionState::Completed, Some(0));
             manager.register(record);
         }
 
-        let records = manager
-            .records
-            .lock()
-            .expect("registry should not be poisoned");
-        assert_eq!(records.len(), MAX_RETAINED_EXECUTIONS);
-        assert!(!records.contains_key("exec_0"));
-        assert!(records.contains_key(&format!("exec_{MAX_RETAINED_EXECUTIONS}")));
+        {
+            let records = manager
+                .records
+                .lock()
+                .expect("registry should not be poisoned");
+            assert_eq!(records.len(), MAX_RETAINED_EXECUTIONS);
+            assert!(!records.contains_key("exec_0"));
+            assert!(records.contains_key(&format!("exec_{MAX_RETAINED_EXECUTIONS}")));
+        }
+        manager.shutdown().await;
+        audit.shutdown().await.expect("test audit should stop");
     }
 
     #[test]

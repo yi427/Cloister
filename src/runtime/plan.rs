@@ -16,6 +16,7 @@ pub struct RuntimePlan {
     pub(super) workspace: WorkspaceMount,
     pub(super) agent_state: Option<AgentStateMount>,
     pub(super) host_bridge_endpoint: Option<String>,
+    pub(super) host_audit_log_path: Option<PathBuf>,
     pub(super) host_commands: Vec<HostCommandPlan>,
     pub(super) command: CommandSpec,
 }
@@ -47,6 +48,10 @@ impl RuntimePlan {
 
     pub fn host_bridge_endpoint(&self) -> Option<&str> {
         self.host_bridge_endpoint.as_deref()
+    }
+
+    pub fn host_audit_log_path(&self) -> Option<&Path> {
+        self.host_audit_log_path.as_deref()
     }
 
     pub fn host_commands(&self) -> &[HostCommandPlan] {
@@ -102,6 +107,14 @@ impl fmt::Display for RuntimePlan {
         }
         if let Some(endpoint) = &self.host_bridge_endpoint {
             writeln!(formatter, "Host bridge: {endpoint}")?;
+            writeln!(
+                formatter,
+                "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
+                self.host_audit_log_path
+                    .as_ref()
+                    .expect("enabled Host bridge should have an audit path")
+                    .display()
+            )?;
             writeln!(
                 formatter,
                 "Host capabilities: host.list_commands, host.exec, host.exec_status, host.exec_cancel (Profile-governed; macOS user permissions)"

@@ -25,7 +25,8 @@ fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[
         .current_dir(current_directory)
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_DATA_HOME");
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME");
     if let Some(path) = path {
         command.env("PATH", path);
     }
@@ -77,10 +78,19 @@ fn dry_run_uses_separate_claude_state_and_transient_host_bridge_config() {
     assert!(stdout.contains("Bearer ${CLOISTER_HOST_BRIDGE_TOKEN}"));
     assert!(stdout.contains("alwaysLoad"));
     assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(stdout.contains(&format!(
+        "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
+        home.join(".local/state/cloister/audit/host-exec.jsonl")
+            .display()
+    )));
     assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
     assert!(stdout.contains("Host Skill: host-exec (canonical read-only image source)"));
     assert!(!stdout.contains("--strict-mcp-config"));
     assert!(!state.exists(), "dry-run must not create Claude state");
+    assert!(
+        !home.join(".local/state/cloister").exists(),
+        "dry-run must not create audit state"
+    );
 }
 
 #[test]

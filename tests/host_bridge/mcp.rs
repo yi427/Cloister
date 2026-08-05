@@ -11,10 +11,10 @@ use std::{
 
 use cloister::{
     host_bridge::{
-        BridgeToken, HOST_EXEC_DSL_VERSION, HostExecCancelRequest, HostExecOutput, HostExecPolicy,
-        HostExecRequest, HostExecStatusRequest, HostExecutionState, HostOutputStream,
-        call_host_exec, call_host_exec_cancel, call_host_exec_status, call_host_list_commands,
-        serve,
+        BridgeToken, HOST_EXEC_DSL_VERSION, HostBridgeContext, HostExecCancelRequest,
+        HostExecOutput, HostExecPolicy, HostExecRequest, HostExecStatusRequest, HostExecutionState,
+        HostOutputStream, call_host_exec, call_host_exec_cancel, call_host_exec_status,
+        call_host_list_commands, serve,
     },
     profile::{
         HostExecAllowProfile, HostExecArguments, HostExecEnvironmentMode,
@@ -48,13 +48,26 @@ async fn start(
             listener,
             token,
             policy,
-            working_directory,
+            context(&working_directory),
             server_cancellation,
         )
         .await
     });
 
     (format!("http://{address}/mcp"), cancellation, handle)
+}
+
+fn context(working_directory: &Path) -> HostBridgeContext {
+    HostBridgeContext::new(
+        "test-profile",
+        "test-agent",
+        working_directory,
+        audit_path(working_directory),
+    )
+}
+
+fn audit_path(working_directory: &Path) -> std::path::PathBuf {
+    working_directory.join("state/cloister/audit/host-exec.jsonl")
 }
 
 fn empty_policy() -> HostExecPolicy {
@@ -214,7 +227,7 @@ async fn server_api_rejects_a_non_loopback_listener() {
         listener,
         token,
         empty_policy(),
-        directory.path().to_owned(),
+        context(directory.path()),
         cancellation,
     )
     .await
@@ -236,7 +249,14 @@ async fn server_rejects_a_missing_working_directory() {
         listener,
         token,
         empty_policy(),
-        directory.path().join("missing-workspace"),
+        HostBridgeContext::new(
+            "test-profile",
+            "test-agent",
+            directory.path().join("missing-workspace"),
+            directory
+                .path()
+                .join("state/cloister/audit/host-exec.jsonl"),
+        ),
         cancellation,
     )
     .await
@@ -277,6 +297,7 @@ async fn discovers_only_profile_allowed_commands_without_environment_values() {
     assert_eq!(output.commands[0].name, "allowed-tool");
     assert_eq!(output.commands[0].arguments, "any");
     assert_eq!(output.environment.variable_names, ["CLOISTER_TEST_SECRET"]);
+    assert!(output.audit_logging);
     assert!(!rendered.contains("secret-value"));
     stop(cancellation, handle).await;
 }
@@ -324,6 +345,55 @@ async fn executes_an_allowed_command_without_shell_parsing() {
 }
 
 #[tokio::test]
+async fn persists_lifecycle_metadata_without_arguments_output_or_environment_values() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("secret-printer");
+    let secret = "do-not-persist-this-secret";
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\"\nprintf '%s\\n' \"$CLOISTER_AUDIT_SECRET\" >&2\n",
+    )
+    .expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy(
+        "secret-printer",
+        &executable,
+        BTreeMap::from([(
+            OsString::from("CLOISTER_AUDIT_SECRET"),
+            OsString::from(secret),
+        )]),
+    );
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(&endpoint, &token, &request("secret-printer", &[secret]))
+        .await
+        .expect("host.exec should start the command");
+    let output = wait_for_terminal(&endpoint, &token, output).await;
+    assert_eq!(output.state, HostExecutionState::Completed);
+    assert!(stream_text(&output, HostOutputStream::Stdout).contains(secret));
+    assert!(stream_text(&output, HostOutputStream::Stderr).contains(secret));
+    stop(cancellation, handle).await;
+
+    let source = fs::read_to_string(audit_path(directory.path()))
+        .expect("Host Exec audit log should be readable");
+    assert!(source.contains("\"event\":\"execution_started\""));
+    assert!(source.contains("\"event\":\"execution_finished\""));
+    assert!(source.contains("\"profile\":\"test-profile\""));
+    assert!(source.contains("\"agent\":\"test-agent\""));
+    assert!(source.contains("\"command\":\"secret-printer\""));
+    assert!(source.contains("\"request_version\":1"));
+    assert!(source.contains("\"argument_count\":1"));
+    assert!(source.contains("\"argument_values_redacted\":true"));
+    assert!(source.contains("\"retained_output_limit_bytes\":1048576"));
+    assert!(source.contains("\"environment_variable_names\":[\"CLOISTER_AUDIT_SECRET\"]"));
+    assert!(!source.contains(secret));
+    assert!(!source.contains("\"args\""));
+    assert!(!source.contains("\"chunks\""));
+}
+
+#[tokio::test]
 async fn rejects_a_command_outside_the_profile_allowlist() {
     let directory = tempdir().expect("temporary directory should exist");
     let token = create_token(&directory.path().join("bridge.token"));
@@ -336,6 +406,10 @@ async fn rejects_a_command_outside_the_profile_allowlist() {
 
     assert!(error.to_string().contains("host command is not allowed"));
     stop(cancellation, handle).await;
+    let source =
+        fs::read_to_string(audit_path(directory.path())).expect("denied request should be audited");
+    assert!(source.contains("\"event\":\"execution_denied\""));
+    assert!(source.contains("\"failure_kind\":\"command_not_allowed\""));
 }
 
 #[tokio::test]

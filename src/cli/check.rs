@@ -4,6 +4,7 @@ use std::{env, path::PathBuf, process::ExitCode};
 
 use crate::{
     error::message,
+    host_bridge::{AuditLogInspection, default_audit_log_path, inspect_audit_log_path},
     preflight::{inspect_host_executable, resolve_guest_proxy, resolve_host_command},
     profile::{Architecture, Profile, load_profile},
     runtime::{
@@ -39,10 +40,16 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
         Some(profile) => {
             record_result(&mut report, "Guest proxy", check_guest_proxy(profile));
             check_host_policy(profile, &mut report);
+            if profile.host.exec.enabled {
+                record_result(&mut report, "Host audit", check_host_audit());
+            } else {
+                report.skip("Host audit", "Host Exec is disabled by Profile");
+            }
         }
         None => {
             report.skip("Guest proxy", "Profile is unavailable");
             report.skip("Host policy", "Profile is unavailable");
+            report.skip("Host audit", "Profile is unavailable");
         }
     }
     let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
@@ -62,6 +69,20 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
     }
 
     report.finish()
+}
+
+fn check_host_audit() -> Result<String, String> {
+    let path = default_audit_log_path().map_err(|error| error.to_string())?;
+    match inspect_audit_log_path(&path).map_err(|error| error.to_string())? {
+        AuditLogInspection::NotCreated => Ok(format!(
+            "{} (not created yet; JSONL, owner-only, 20 MiB total)",
+            path.display()
+        )),
+        AuditLogInspection::Ready => Ok(format!(
+            "{} (ready; JSONL, owner-only, 20 MiB total)",
+            path.display()
+        )),
+    }
 }
 
 fn check_guest_proxy(profile: &Profile) -> Result<String, String> {

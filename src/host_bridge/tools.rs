@@ -37,7 +37,10 @@ pub struct HostEnvironmentInfo {
     pub variable_names: Vec<String>,
 }
 
-pub(super) fn host_list_commands(policy: &HostExecPolicy) -> HostListCommandsOutput {
+pub(super) fn host_list_commands(
+    policy: &HostExecPolicy,
+    audit_logging: bool,
+) -> HostListCommandsOutput {
     HostListCommandsOutput {
         version: HOST_EXEC_DSL_VERSION,
         commands: policy
@@ -57,7 +60,7 @@ pub(super) fn host_list_commands(policy: &HostExecPolicy) -> HostListCommandsOut
                 .map(|name| name.to_string_lossy().into_owned())
                 .collect(),
         },
-        audit_logging: false,
+        audit_logging,
     }
 }
 
@@ -94,7 +97,7 @@ mod tests {
     use crate::{
         host_bridge::{
             HOST_EXEC_DSL_VERSION, HostExecPolicy, HostExecRequest, HostExecutionState,
-            HostOutputStream, execution::ExecutionManager,
+            HostOutputStream, audit::AuditController, execution::ExecutionManager,
         },
         profile::{
             HostExecAllowProfile, HostExecArguments, HostExecEnvironmentMode,
@@ -117,7 +120,16 @@ mod tests {
             .expect("test policy should build")
             .expect("test policy should be enabled");
 
-        let executions = ExecutionManager::new();
+        let audit = AuditController::start(
+            directory
+                .path()
+                .join("state/cloister/audit/host-exec.jsonl"),
+            "test".to_owned(),
+            "test-agent".to_owned(),
+            directory.path().to_owned(),
+        )
+        .expect("test audit should start");
+        let executions = ExecutionManager::new(audit.log());
         let mut output = host_exec(
             &executions,
             &policy,
@@ -160,6 +172,8 @@ mod tests {
         assert_eq!(stdout, "$(uname)\n; exit 0\n");
         assert_eq!(stderr, "stderr");
         assert_eq!(output.exit_code, Some(7));
+        executions.shutdown().await;
+        audit.shutdown().await.expect("test audit should stop");
     }
 
     #[test]
@@ -174,7 +188,7 @@ mod tests {
         .expect("test policy should build")
         .expect("test policy should be enabled");
 
-        let output = host_list_commands(&policy);
+        let output = host_list_commands(&policy, true);
         let rendered = serde_json::to_string(&output).expect("discovery should serialize");
 
         assert_eq!(output.version, HOST_EXEC_DSL_VERSION);
@@ -183,7 +197,7 @@ mod tests {
         assert_eq!(output.commands[0].arguments, "any");
         assert_eq!(output.environment.mode, "inherit-all");
         assert_eq!(output.environment.variable_names, ["CLOISTER_SECRET_NAME"]);
-        assert!(!output.audit_logging);
+        assert!(output.audit_logging);
         assert!(!rendered.contains("secret-value"));
     }
 

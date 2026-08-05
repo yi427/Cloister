@@ -24,7 +24,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::message;
 
-use super::{BridgeToken, HostExecPolicy, execution::ExecutionManager, tools};
+use super::{
+    AuditLogError, BridgeToken, HostExecPolicy, audit::AuditController,
+    execution::ExecutionManager, tools,
+};
 
 const ALLOWED_MCP_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "host.container.internal"];
 const REQUIRES_USER_INTERACTION: &str = "anthropic/requiresUserInteraction";
@@ -72,7 +75,7 @@ impl HostBridgeService {
         annotations(read_only_hint = true)
     )]
     async fn host_list_commands(&self) -> Json<super::HostListCommandsOutput> {
-        Json(tools::host_list_commands(&self.policy))
+        Json(tools::host_list_commands(&self.policy, true))
     }
 
     #[tool(
@@ -83,7 +86,6 @@ impl HostBridgeService {
         &self,
         Parameters(input): Parameters<super::HostExecRequest>,
     ) -> Result<Json<super::HostExecOutput>, String> {
-        let started = std::time::Instant::now();
         let result = tools::host_exec(
             &self.executions,
             &self.policy,
@@ -91,18 +93,6 @@ impl HostBridgeService {
             &self.working_directory,
         )
         .await;
-
-        match &result {
-            Ok(output) => eprintln!(
-                "audit capability=host.exec command={:?} outcome=started execution_id={:?} state={:?} duration_ms={}",
-                input.command, output.execution_id, output.state, output.duration_ms
-            ),
-            Err(error) => eprintln!(
-                "audit capability=host.exec command={:?} outcome=failed duration_ms={} error={error}",
-                input.command,
-                started.elapsed().as_millis(),
-            ),
-        }
 
         result.map(Json).map_err(|error| error.to_string())
     }
@@ -149,7 +139,7 @@ pub async fn serve(
     listener: TcpListener,
     token: BridgeToken,
     policy: HostExecPolicy,
-    working_directory: PathBuf,
+    context: HostBridgeContext,
     cancellation: CancellationToken,
 ) -> Result<(), HostBridgeServerError> {
     let local_address = listener
@@ -160,7 +150,7 @@ pub async fn serve(
             address: local_address,
         });
     }
-    let configured_working_directory = working_directory;
+    let configured_working_directory = context.working_directory;
     let working_directory =
         std::fs::canonicalize(&configured_working_directory).map_err(|source| {
             HostBridgeServerError::WorkingDirectory {
@@ -179,9 +169,16 @@ pub async fn serve(
         });
     }
 
+    let audit = AuditController::start(
+        context.audit_log_path,
+        context.profile_name,
+        context.agent_name,
+        working_directory.clone(),
+    )
+    .map_err(HostBridgeServerError::Audit)?;
     let policy = Arc::new(policy);
     let working_directory = Arc::new(working_directory);
-    let executions = ExecutionManager::new();
+    let executions = ExecutionManager::new(audit.log());
     let service_executions = Arc::clone(&executions);
     let service: StreamableHttpService<HostBridgeService, LocalSessionManager> =
         StreamableHttpService::new(
@@ -207,7 +204,38 @@ pub async fn serve(
         .with_graceful_shutdown(cancellation.cancelled_owned())
         .await;
     executions.shutdown().await;
-    result.map_err(HostBridgeServerError::Serve)
+    let audit_result = audit.shutdown().await;
+    result.map_err(HostBridgeServerError::Serve)?;
+    audit_result.map_err(HostBridgeServerError::Audit)
+}
+
+/// Immutable host-side metadata and audit destination for one bridge lifecycle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostBridgeContext {
+    profile_name: String,
+    agent_name: String,
+    working_directory: PathBuf,
+    audit_log_path: PathBuf,
+}
+
+impl HostBridgeContext {
+    pub fn new(
+        profile_name: impl Into<String>,
+        agent_name: impl Into<String>,
+        working_directory: impl Into<PathBuf>,
+        audit_log_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            profile_name: profile_name.into(),
+            agent_name: agent_name.into(),
+            working_directory: working_directory.into(),
+            audit_log_path: audit_log_path.into(),
+        }
+    }
+
+    pub fn audit_log_path(&self) -> &std::path::Path {
+        &self.audit_log_path
+    }
 }
 
 async fn authorize(State(expected): State<BridgeToken>, request: Request, next: Next) -> Response {
@@ -232,6 +260,7 @@ async fn authorize(State(expected): State<BridgeToken>, request: Request, next: 
 /// Failure while serving the host capability endpoint.
 #[derive(Debug)]
 pub enum HostBridgeServerError {
+    Audit(AuditLogError),
     InspectListener(io::Error),
     NonLoopback { address: std::net::SocketAddr },
     WorkingDirectory { path: PathBuf, source: io::Error },
@@ -243,6 +272,7 @@ pub enum HostBridgeServerError {
 impl fmt::Display for HostBridgeServerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Audit(source) => source.fmt(formatter),
             Self::InspectListener(source) => {
                 write!(formatter, "{}: {source}", message::BRIDGE_LISTEN_FAILED)
             }
@@ -274,6 +304,7 @@ impl fmt::Display for HostBridgeServerError {
 impl Error for HostBridgeServerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Audit(source) => Some(source),
             Self::InspectListener(source)
             | Self::WorkingDirectory { source, .. }
             | Self::Serve(source) => Some(source),
@@ -288,17 +319,30 @@ impl Error for HostBridgeServerError {
 mod tests {
     use std::sync::Arc;
 
-    use super::{ExecutionManager, HostBridgeService, REQUIRES_USER_INTERACTION};
-    use crate::host_bridge::{HostEnvironment, HostExecPolicy};
+    use tempfile::tempdir;
 
-    #[test]
-    fn exposes_discovery_and_structured_execution_tools() {
+    use super::{ExecutionManager, HostBridgeService, REQUIRES_USER_INTERACTION};
+    use crate::host_bridge::{HostEnvironment, HostExecPolicy, audit::AuditController};
+
+    #[tokio::test]
+    async fn exposes_discovery_and_structured_execution_tools() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let audit = AuditController::start(
+            directory
+                .path()
+                .join("state/cloister/audit/host-exec.jsonl"),
+            "test".to_owned(),
+            "test-agent".to_owned(),
+            directory.path().to_owned(),
+        )
+        .expect("test audit should start");
         let policy = HostExecPolicy::new([], HostEnvironment::new())
             .expect("empty test policy should build");
+        let executions = ExecutionManager::new(audit.log());
         let service = HostBridgeService::new(
             Arc::new(policy),
             Arc::new(std::env::current_dir().expect("current directory should resolve")),
-            ExecutionManager::new(),
+            Arc::clone(&executions),
         );
         let mut tools = service.tool_router.list_all();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
@@ -340,5 +384,8 @@ mod tests {
                 tool.name
             );
         }
+        drop(service);
+        executions.shutdown().await;
+        audit.shutdown().await.expect("test audit should stop");
     }
 }

@@ -121,6 +121,19 @@ a shell. It returns an execution ID after a 100 ms inline window. Callers use
 `host.exec_cancel` to terminate an unwanted execution and its process group.
 There is no global execution timeout.
 
+Host Exec writes versioned JSONL lifecycle metadata to
+`${XDG_STATE_HOME:-~/.local/state}/cloister/audit/host-exec.jsonl`. The
+`cloister` and `audit` directories are owner-only (`0700`), log and lock files
+are `0600`, and symbolic links, hard-linked files, wrong owners, or broader
+permissions are rejected. The active and rotated files are each limited to
+10 MiB, for a 20 MiB total log bound; oversized existing segments are rejected
+rather than truncated. Rotation and appends are coordinated by an inter-process
+file lock, and Bridge shutdown drains the audit writer. Raw
+arguments, stdout, stderr, environment values, bearer tokens, and agent
+credentials are never persisted. Because Host Exec runs as the same macOS
+user, an allowed host command can still modify or delete these observational
+logs; they are not a tamper-proof security boundary.
+
 The canonical current-surface instructions for models live in
 [`skills/host-exec/SKILL.md`](skills/host-exec/SKILL.md). The Skill requires
 policy discovery before execution, literal structured arguments, bounded
@@ -314,10 +327,10 @@ The active policy design and remaining work are documented in
 Profile-governed executable allowlist, command discovery, structured argv,
 controlled environment inheritance, asynchronous execution status and
 cancellation, and JSONL auditing. The allowlist, discovery, structured direct
-execution, environment inheritance, status, cancellation, and process-group
-cleanup are connected now. Dynamic schema enumeration and persistent JSONL
-auditing remain to be implemented. The canonical Skill and agent-native
-discovery are connected now.
+execution, environment inheritance, status, cancellation, process-group
+cleanup, and bounded persistent JSONL auditing are connected now. Dynamic
+schema enumeration remains to be implemented. The canonical Skill and
+agent-native discovery are connected now.
 [`ADR 0002`](docs/adr/0002-host-capability-bridge.md)
 now records the superseded arbitrary-shell bridge.
 

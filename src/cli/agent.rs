@@ -20,8 +20,9 @@ use crate::{
     agent::AgentAdapter,
     error::message,
     host_bridge::{
-        BridgeToken, BridgeTokenError, HostBridgeServerError, HostEnvironment, HostExecPolicy,
-        HostExecPolicyBuildError, serve as serve_host_bridge,
+        AuditLogPathError, BridgeToken, BridgeTokenError, HostBridgeContext, HostBridgeServerError,
+        HostEnvironment, HostExecPolicy, HostExecPolicyBuildError, default_audit_log_path,
+        serve as serve_host_bridge,
     },
     preflight::{
         GuestProxyResolutionError, HostExecutableCheckError, PreflightError,
@@ -81,6 +82,10 @@ pub(super) async fn execute_agent(
     let guest_proxy =
         resolve_guest_proxy(resolved.profile().network.proxy, host_environment.clone())?;
     let host_bridge_enabled = !arguments.no_host_bridge && resolved.profile().host.exec.enabled;
+    let audit_log_path = host_bridge_enabled
+        .then(default_audit_log_path)
+        .transpose()
+        .map_err(AgentCommandError::AuditPath)?;
     if host_bridge_enabled {
         validate_host_executables(resolved.profile())?;
     }
@@ -95,7 +100,9 @@ pub(super) async fn execute_agent(
     }
     if arguments.dry_run {
         let endpoint = host_bridge_endpoint(arguments.host_bridge_port);
-        let host_bridge = host_bridge_enabled.then(|| HostBridgeLaunch::dry_run(endpoint.as_str()));
+        let host_bridge = audit_log_path
+            .as_deref()
+            .map(|path| HostBridgeLaunch::dry_run(endpoint.as_str(), path));
         let plan = plan_agent_container(
             &resolved,
             agent,
@@ -117,7 +124,10 @@ pub(super) async fn execute_agent(
             RunningHostBridge::start(
                 arguments.host_bridge_port,
                 policy,
+                resolved.profile().name.clone(),
+                agent.display_name().to_owned(),
                 resolved.workspace().to_owned(),
+                audit_log_path.expect("enabled Host bridge should have an audit path"),
             )
             .await?,
         )
@@ -193,6 +203,7 @@ struct RunningHostBridge {
     token: BridgeToken,
     endpoint: String,
     allowed_command_count: usize,
+    audit_log_path: PathBuf,
     cancellation: CancellationToken,
     task: JoinHandle<Result<(), HostBridgeServerError>>,
 }
@@ -201,7 +212,10 @@ impl RunningHostBridge {
     async fn start(
         port: NonZeroU16,
         policy: HostExecPolicy,
+        profile_name: String,
+        agent_name: String,
         working_directory: PathBuf,
+        audit_log_path: PathBuf,
     ) -> Result<Self, AgentCommandError> {
         let token = BridgeToken::generate()?;
         let address = SocketAddr::from(([127, 0, 0, 1], port.get()));
@@ -212,12 +226,18 @@ impl RunningHostBridge {
         let server_cancellation = cancellation.clone();
         let server_token = token.clone();
         let allowed_command_count = policy.command_count();
+        let server_audit_log_path = audit_log_path.clone();
         let task = tokio::spawn(async move {
             serve_host_bridge(
                 listener,
                 server_token,
                 policy,
-                working_directory,
+                HostBridgeContext::new(
+                    profile_name,
+                    agent_name,
+                    working_directory,
+                    server_audit_log_path,
+                ),
                 server_cancellation,
             )
             .await
@@ -227,17 +247,22 @@ impl RunningHostBridge {
             token,
             endpoint: host_bridge_endpoint(port),
             allowed_command_count,
+            audit_log_path,
             cancellation,
             task,
         })
     }
 
     fn launch(&self) -> HostBridgeLaunch<'_> {
-        HostBridgeLaunch::new(&self.endpoint, self.token.secret())
+        HostBridgeLaunch::new(&self.endpoint, self.token.secret(), &self.audit_log_path)
     }
 
     fn announce(&self, agent_name: &str) {
         println!("Host bridge: {}", self.endpoint);
+        println!(
+            "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
+            self.audit_log_path.display()
+        );
         println!(
             "Host capabilities: host.list_commands, host.exec, host.exec_status, host.exec_cancel ({} Profile-allowed command(s); macOS user permissions)",
             self.allowed_command_count
@@ -319,6 +344,7 @@ fn prepare_agent_state_directory(agent: &dyn AgentAdapter) -> Result<PathBuf, Ag
 
 #[derive(Debug)]
 pub(super) enum AgentCommandError {
+    AuditPath(AuditLogPathError),
     AgentState {
         path: PathBuf,
         kind: AgentStateDirectoryErrorKind,
@@ -362,6 +388,7 @@ pub(super) enum AgentStateDirectoryErrorKind {
 impl fmt::Display for AgentCommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AuditPath(error) => error.fmt(formatter),
             Self::AgentState { path, kind } => {
                 let prefix = match kind {
                     AgentStateDirectoryErrorKind::Create(_) => message::AGENT_STATE_CREATE_FAILED,
@@ -426,6 +453,7 @@ impl fmt::Display for AgentCommandError {
 impl Error for AgentCommandError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::AuditPath(error) => Some(error),
             Self::AgentState { kind, .. } => match kind {
                 AgentStateDirectoryErrorKind::Create(source)
                 | AgentStateDirectoryErrorKind::Metadata(source)

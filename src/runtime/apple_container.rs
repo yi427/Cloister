@@ -92,20 +92,23 @@ fn apple_container_command<'a>(arguments: impl IntoIterator<Item = &'a str>) -> 
 pub struct HostBridgeLaunch<'a> {
     endpoint: &'a str,
     bearer_token: Option<&'a str>,
+    audit_log_path: &'a Path,
 }
 
 impl<'a> HostBridgeLaunch<'a> {
-    pub const fn new(endpoint: &'a str, bearer_token: &'a str) -> Self {
+    pub const fn new(endpoint: &'a str, bearer_token: &'a str, audit_log_path: &'a Path) -> Self {
         Self {
             endpoint,
             bearer_token: Some(bearer_token),
+            audit_log_path,
         }
     }
 
-    pub const fn dry_run(endpoint: &'a str) -> Self {
+    pub const fn dry_run(endpoint: &'a str, audit_log_path: &'a Path) -> Self {
         Self {
             endpoint,
             bearer_token: None,
+            audit_log_path,
         }
     }
 }
@@ -116,6 +119,7 @@ impl fmt::Debug for HostBridgeLaunch<'_> {
             .debug_struct("HostBridgeLaunch")
             .field("endpoint", &self.endpoint)
             .field("bearer_token", &"[REDACTED]")
+            .field("audit_log_path", &self.audit_log_path)
             .finish()
     }
 }
@@ -209,6 +213,7 @@ pub fn plan_agent_container(
         workspace,
         agent_state,
         host_bridge_endpoint: host_bridge.map(|bridge| bridge.endpoint.to_owned()),
+        host_audit_log_path: host_bridge.map(|bridge| bridge.audit_log_path.to_owned()),
         host_commands,
         command,
     })

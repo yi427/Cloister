@@ -36,7 +36,8 @@ fn run_with_environment(
         .current_dir(current_directory)
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_DATA_HOME");
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME");
     for name in [
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -104,6 +105,11 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     )));
     assert!(stdout.contains("\"CODEX_HOME=/cloister/agents/codex\""));
     assert!(stdout.contains("Host bridge: http://host.container.internal:17834/mcp"));
+    assert!(stdout.contains(&format!(
+        "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
+        home.join(".local/state/cloister/audit/host-exec.jsonl")
+            .display()
+    )));
     assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
     assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
     assert!(stdout.contains("Host Skill: host-exec (canonical read-only image source)"));
@@ -118,6 +124,10 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("tools.\\\"host.exec\\\".approval_mode=\\\"prompt\\\""));
     assert!(stdout.contains("\"cloister:dev\""));
     assert!(!state.exists(), "dry-run must not create agent state");
+    assert!(
+        !home.join(".local/state/cloister").exists(),
+        "dry-run must not create audit state"
+    );
 }
 
 #[test]
@@ -396,6 +406,16 @@ fn starts_the_default_bridge_and_forwards_only_the_token_name() {
     assert!(stdout.contains("default_tools_approval_mode=\"auto\""));
     assert!(stdout.contains("tools.\"host.exec\".approval_mode=\"prompt\""));
     TcpListener::bind(("127.0.0.1", port)).expect("bridge port should be released after Codex");
+    let audit_log = home.join(".local/state/cloister/audit/host-exec.jsonl");
+    assert!(audit_log.is_file());
+    assert_eq!(
+        fs::metadata(&audit_log)
+            .expect("audit log metadata should exist")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
 }
 
 #[test]

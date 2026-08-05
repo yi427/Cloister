@@ -75,10 +75,9 @@ boundaries are needed.
 a Profile V5 executable allowlist, structured argument vectors, environment
 policy, and command discovery. Those enforcement pieces are connected. Its
 asynchronous execution status, cancellation, process-group cleanup, and Skill
-are also connected. Dynamic schema enumeration and JSONL auditing remain
-incomplete.
+are also connected, including bounded persistent JSONL auditing. Dynamic schema
+enumeration remains incomplete.
 
 ## Deferred
 
 Cloister does not yet create or repair the privileged Apple localhost DNS rule.
-The successor does not yet implement persistent audit storage.

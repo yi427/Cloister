@@ -306,12 +306,13 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let endpoint = "http://host.container.internal:17834/mcp";
     let token = "sensitive-bridge-token";
+    let audit_log_path = fixture("valid/audit/host-exec.jsonl");
 
     let plan = plan_agent_container(
         &resolved,
         &CodexAgent,
         None,
-        Some(HostBridgeLaunch::new(endpoint, token)),
+        Some(HostBridgeLaunch::new(endpoint, token, &audit_log_path)),
         None,
         &[],
     )
@@ -319,6 +320,7 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     let arguments = plan.command().arguments();
 
     assert_eq!(plan.host_bridge_endpoint(), Some(endpoint));
+    assert_eq!(plan.host_audit_log_path(), Some(audit_log_path.as_path()));
     assert!(
         arguments
             .windows(2)
@@ -348,6 +350,10 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     let display = plan.to_string();
     let debug = format!("{plan:?}");
     assert!(display.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(display.contains(&format!(
+        "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
+        audit_log_path.display()
+    )));
     assert!(display.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
     assert!(display.contains("Host Skill: host-exec (canonical read-only image source)"));
     assert!(display.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
