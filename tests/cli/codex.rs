@@ -2,7 +2,7 @@ use std::{
     fs,
     net::TcpListener,
     os::unix::fs::{PermissionsExt, symlink},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Output},
 };
 
@@ -10,15 +10,26 @@ use tempfile::tempdir;
 
 const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
 
-fn write_default_profile(home: &Path) {
+fn write_default_profile(home: &Path) -> PathBuf {
     let config = home.join(".config/cloister/profile.toml");
+    let host_command = home.join("host-bin/xcodebuild");
     fs::create_dir_all(config.parent().expect("config should have a parent"))
         .expect("config directory should be created");
-    fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"),
-        config,
+    fs::create_dir_all(
+        host_command
+            .parent()
+            .expect("host command should have a parent"),
     )
-    .expect("default profile should be written");
+    .expect("host command directory should be created");
+    fs::write(&host_command, "#!/bin/sh\nexit 0\n").expect("fake host command should be written");
+    fs::set_permissions(&host_command, fs::Permissions::from_mode(0o755))
+        .expect("fake host command should be executable");
+    let profile =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"))
+            .expect("example Profile should be readable")
+            .replace("/usr/bin/xcodebuild", &host_command.display().to_string());
+    fs::write(config, profile).expect("default profile should be written");
+    host_command
 }
 
 fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[&str]) -> Output {
@@ -86,7 +97,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     let home = directory.path().join("home");
     let project = directory.path().join("project");
     fs::create_dir_all(&project).expect("project should be created");
-    write_default_profile(&home);
+    let host_command = write_default_profile(&home);
 
     let output = run(&home, &project, None, &["codex", "--dry-run"]);
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
@@ -115,7 +126,10 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
     assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
     assert!(stdout.contains("Host Skill: host-exec (canonical read-only image source)"));
-    assert!(stdout.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
+    assert!(stdout.contains(&format!(
+        "xcodebuild: declared '{}'",
+        host_command.display()
+    )));
     assert!(stdout.contains("Host bridge token: ephemeral, forwarded, and redacted"));
     assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
     assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
@@ -296,14 +310,25 @@ fn loads_the_default_global_profile_when_present() {
     let home = directory.path().join("home");
     let project = directory.path().join("project");
     let config = home.join(".config/cloister/profile.toml");
+    let host_command = home.join("host-bin/xcodebuild");
     fs::create_dir_all(&project).expect("project should be created");
     fs::create_dir_all(config.parent().expect("config should have a parent"))
         .expect("config directory should be created");
+    fs::create_dir_all(
+        host_command
+            .parent()
+            .expect("host command should have a parent"),
+    )
+    .expect("host command directory should be created");
+    fs::write(&host_command, "#!/bin/sh\nexit 0\n").expect("fake host command should be written");
+    fs::set_permissions(&host_command, fs::Permissions::from_mode(0o755))
+        .expect("fake host command should be executable");
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/profiles/valid/default.toml");
     let profile = fs::read_to_string(fixture)
         .expect("fixture should be readable")
-        .replace("name = \"rust-default\"", "name = \"global-profile\"");
+        .replace("name = \"rust-default\"", "name = \"global-profile\"")
+        .replace("/usr/bin/xcodebuild", &host_command.display().to_string());
     fs::write(config, profile).expect("global profile should be written");
 
     let output = run(&home, &project, None, &["codex", "--dry-run"]);
@@ -380,7 +405,8 @@ fn starts_the_default_bridge_and_forwards_only_the_token_name() {
     .expect("fake container runtime should be written");
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755))
         .expect("fake runtime should be executable");
-    let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml");
+    write_default_profile(&home);
+    let profile = home.join(".config/cloister/profile.toml");
 
     let output = run(
         &home,

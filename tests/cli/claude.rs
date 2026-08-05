@@ -1,7 +1,7 @@
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Output},
 };
 
@@ -9,15 +9,26 @@ use tempfile::tempdir;
 
 const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
 
-fn write_default_profile(home: &Path) {
+fn write_default_profile(home: &Path) -> PathBuf {
     let config = home.join(".config/cloister/profile.toml");
+    let host_command = home.join("host-bin/xcodebuild");
     fs::create_dir_all(config.parent().expect("config should have a parent"))
         .expect("config directory should be created");
-    fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"),
-        config,
+    fs::create_dir_all(
+        host_command
+            .parent()
+            .expect("host command should have a parent"),
     )
-    .expect("default profile should be written");
+    .expect("host command directory should be created");
+    fs::write(&host_command, "#!/bin/sh\nexit 0\n").expect("fake host command should be written");
+    fs::set_permissions(&host_command, fs::Permissions::from_mode(0o755))
+        .expect("fake host command should be executable");
+    let profile =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"))
+            .expect("example Profile should be readable")
+            .replace("/usr/bin/xcodebuild", &host_command.display().to_string());
+    fs::write(config, profile).expect("default profile should be written");
+    host_command
 }
 
 fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[&str]) -> Output {
