@@ -70,12 +70,15 @@ fn dry_run_uses_separate_claude_state_and_transient_host_bridge_config() {
         state.display()
     )));
     assert!(stdout.contains("\"CLAUDE_CONFIG_DIR=/cloister/agents/claude\""));
+    assert!(stdout.contains("\"--add-dir\""));
+    assert!(stdout.contains("/usr/local/share/cloister/claude-skill-root"));
     assert!(stdout.contains("\"--mcp-config\""));
     assert!(stdout.contains("host.container.internal:17834/mcp"));
     assert!(stdout.contains("Bearer ${CLOISTER_HOST_BRIDGE_TOKEN}"));
     assert!(stdout.contains("alwaysLoad"));
     assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
     assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
+    assert!(stdout.contains("Host Skill: host-exec (canonical read-only image source)"));
     assert!(!stdout.contains("--strict-mcp-config"));
     assert!(!state.exists(), "dry-run must not create Claude state");
 }
@@ -101,6 +104,43 @@ fn can_disable_the_default_host_bridge() {
     assert!(stdout.contains("Host bridge: disabled"));
     assert!(!stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
     assert!(!stdout.contains("--mcp-config"));
+    assert!(!stdout.contains("--add-dir"));
+    assert!(!stdout.contains("Host Skill: host-exec"));
+}
+
+#[test]
+fn refuses_to_shadow_an_existing_shared_claude_host_skill() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let skill = home.join(".local/share/cloister/agents/claude/skills/host-exec");
+    fs::create_dir_all(&skill).expect("existing Skill directory should be created");
+    fs::write(skill.join("SKILL.md"), "user-owned\n").expect("existing Skill should be written");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_default_profile(&home);
+
+    let output = run(&home, &project, None, &["claude", "--dry-run"]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("refusing to shadow or overwrite the existing Host Skill"));
+    assert!(stderr.contains(&skill.display().to_string()));
+    assert_eq!(
+        fs::read_to_string(skill.join("SKILL.md")).expect("existing Skill should remain"),
+        "user-owned\n"
+    );
+
+    let disabled = run(
+        &home,
+        &project,
+        None,
+        &["claude", "--no-host-bridge", "--dry-run"],
+    );
+    assert!(
+        disabled.status.success(),
+        "a disabled bridge must leave the user Skill usable"
+    );
 }
 
 #[test]

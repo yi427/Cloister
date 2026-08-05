@@ -8,6 +8,8 @@ on:
       - "v*"
     paths:
       - images/rust-node/**
+      - skills/host-exec/**
+      - .dockerignore
       - .github/workflows/publish-image.yml
   workflow_dispatch:
 
@@ -75,7 +77,7 @@ jobs:
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
-          context: images/rust-node
+          context: .
           file: images/rust-node/Containerfile
           platforms: linux/arm64
           push: true

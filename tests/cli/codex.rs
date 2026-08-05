@@ -106,6 +106,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("Host bridge: http://host.container.internal:17834/mcp"));
     assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
     assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
+    assert!(stdout.contains("Host Skill: host-exec (canonical read-only image source)"));
     assert!(stdout.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
     assert!(stdout.contains("Host bridge token: ephemeral, forwarded, and redacted"));
     assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
@@ -198,6 +199,7 @@ fn can_disable_the_default_host_bridge() {
     assert!(stdout.contains("Host bridge: disabled"));
     assert!(!stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
     assert!(!stdout.contains("mcp_servers.cloister_host"));
+    assert!(!stdout.contains("Host Skill: host-exec"));
 }
 
 #[test]

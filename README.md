@@ -56,11 +56,14 @@ the package public before unauthenticated users can pull it.
 The complete tag and release policy is documented in
 [`docs/releasing.md`](docs/releasing.md).
 
-This produces `cloister:dev` with Node.js, Rust, Git, Codex CLI, and
-Claude Code installed. The tool versions are pinned in
-[`images/rust-node/Containerfile`](images/rust-node/Containerfile). The image
-uses a non-root `cloister` user and keeps its temporary home and CLI state under
-the guest `/tmp` tmpfs. It does not contain or mount host credentials.
+This produces `cloister:dev` with Node.js, Rust, Git, Codex CLI, Claude Code,
+and Debian's `bubblewrap` package installed. Providing `bwrap` on `PATH` lets
+Codex use its normal Linux sandbox without falling back to its bundled helper
+or printing the missing-bubblewrap startup warning. The tool versions are
+pinned in [`images/rust-node/Containerfile`](images/rust-node/Containerfile).
+The image uses a non-root `cloister` user and keeps its temporary home and CLI
+state under the guest `/tmp` tmpfs. It does not contain or mount host
+credentials.
 
 Run Codex or Claude Code in the current project:
 
@@ -115,6 +118,20 @@ argument policy, and inherited environment variable names without values.
 the executable only from that allowlist, and passes arguments directly without
 a shell. The initial connected implementation waits synchronously for the
 process result; asynchronous status and cancellation remain a later slice.
+
+The canonical current-surface instructions for models live in
+[`skills/host-exec/SKILL.md`](skills/host-exec/SKILL.md). The Skill requires
+policy discovery before execution, literal structured arguments, accurate
+approval and result reporting, and no fallback around a denial. It deliberately
+describes only the connected `host.list_commands` and synchronous `host.exec`
+tools. The image contains one read-only canonical source. When the Host Bridge
+is enabled, Codex receives a temporary symlink under `$HOME/.agents/skills`,
+while Claude receives an image-owned `--add-dir` whose `.claude/skills` entry
+points to the same source. Neither path writes to `CODEX_HOME` or
+`CLAUDE_CONFIG_DIR`. If shared Claude state already contains
+`skills/host-exec`, Cloister refuses to start the bridge instead of overwriting
+or silently shadowing either Skill. `--no-host-bridge` exposes neither path and
+does not apply that conflict check.
 
 Codex receives transient `--config` values that require the server, enable only
 `host.list_commands` and `host.exec`, and request per-call approval. Claude
@@ -297,8 +314,9 @@ Profile-governed executable allowlist, command discovery, structured argv,
 controlled environment inheritance, asynchronous execution status and
 cancellation, and JSONL auditing. The allowlist, discovery, structured direct
 execution, and environment inheritance are connected now. Status, cancellation,
-dynamic schema enumeration, the canonical Skill, and persistent JSONL auditing
-remain to be implemented. [`ADR 0002`](docs/adr/0002-host-capability-bridge.md)
+dynamic schema enumeration, and persistent JSONL auditing remain to be
+implemented. The canonical Skill and agent-native discovery are connected now.
+[`ADR 0002`](docs/adr/0002-host-capability-bridge.md)
 now records the superseded arbitrary-shell bridge.
 
 The guest proxy contract and its security consequences are documented in
@@ -322,8 +340,9 @@ src/
     ├── model.rs            Versioned profile data model
     ├── parser.rs           Side-effect-free parsing
     └── validation.rs       Fail-closed semantic validation
-tests/           Cross-module and CLI integration tests
+tests/           Cross-module, CLI, and canonical Skill contract tests
 tests/fixtures/  Deterministic test inputs and expected outputs
+skills/          Canonical agent Skill sources
 examples/        User-facing configuration examples
 docs/adr/        Architecture decision records
 ```

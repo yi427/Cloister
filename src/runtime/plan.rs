@@ -123,6 +123,10 @@ impl fmt::Display for RuntimePlan {
             writeln!(formatter, "{} MCP approval: prompt", self.agent_name)?;
             writeln!(
                 formatter,
+                "Host Skill: host-exec (canonical read-only image source)"
+            )?;
+            writeln!(
+                formatter,
                 "Host bridge token: ephemeral, forwarded, and redacted"
             )?;
         } else {

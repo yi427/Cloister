@@ -26,8 +26,9 @@ The first connected slice now enforces the Profile allowlist, exposes
 inherits the complete trusted host environment, and starts the selected
 absolute executable directly without `/bin/zsh -lc`. It returns process output
 synchronously. The asynchronous execution manager, status, cancellation,
-dynamic command enumeration in JSON Schema, canonical Skill, and persistent
-JSONL audit log remain planned portions of this accepted design.
+dynamic command enumeration in JSON Schema and persistent JSONL audit log remain
+planned portions of this accepted design. The canonical Skill and its Codex and
+Claude discovery paths are connected.
 
 ## Decision summary
 
@@ -441,6 +442,20 @@ The Profile is immutable for one bridge lifecycle, so one successful discovery
 call is sufficient unless the agent reconnects to a new bridge. The Skill must
 state that command availability is an explicit host permission and that an
 allowed interpreter or build tool may still be high privilege.
+
+The semantics for the currently connected synchronous two-tool surface are now
+maintained in [`skills/host-exec/SKILL.md`](../../skills/host-exec/SKILL.md).
+They intentionally omit `host.exec_status` and `host.exec_cancel` until those
+tools exist. The image owns one read-only canonical source. With the Host Bridge
+enabled, Codex receives a temporary `$HOME/.agents/skills` symlink and Claude
+receives an image-owned `--add-dir` containing a `.claude/skills` symlink.
+Neither adapter writes Skill files into persistent agent state, and disabling
+the bridge also disables these discovery paths. Because Claude gives its
+persistent Skill directory precedence over additional project directories,
+Cloister rejects an existing shared-state `skills/host-exec` entry before
+starting the bridge. It does not overwrite the user entry or silently run with
+an ambiguous instruction source; the check is not applied when the bridge is
+disabled.
 
 ## CLI behavior
 

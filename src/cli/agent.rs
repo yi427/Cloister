@@ -90,6 +90,9 @@ pub(super) async fn execute_agent(
         AgentState::Shared if arguments.dry_run => Some(agent_state_directory_path(agent)?),
         AgentState::Shared => Some(prepare_agent_state_directory(agent)?),
     };
+    if host_bridge_enabled {
+        validate_host_skill_conflict(agent, shared_state.as_deref())?;
+    }
     if arguments.dry_run {
         let endpoint = host_bridge_endpoint(arguments.host_bridge_port);
         let host_bridge = host_bridge_enabled.then(|| HostBridgeLaunch::dry_run(endpoint.as_str()));
@@ -167,6 +170,23 @@ fn validate_host_executables(profile: &Profile) -> Result<(), AgentCommandError>
         })?;
     }
     Ok(())
+}
+
+fn validate_host_skill_conflict(
+    agent: &dyn AgentAdapter,
+    shared_state: Option<&Path>,
+) -> Result<(), AgentCommandError> {
+    let (Some(shared_state), Some(relative_path)) =
+        (shared_state, agent.host_skill_conflict_path())
+    else {
+        return Ok(());
+    };
+    let path = shared_state.join(relative_path);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => Err(AgentCommandError::HostSkillConflict { path }),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(AgentCommandError::HostSkillConflictInspection { path, source }),
+    }
 }
 
 struct RunningHostBridge {
@@ -319,6 +339,13 @@ pub(super) enum AgentCommandError {
         command: String,
         source: HostExecutableCheckError,
     },
+    HostSkillConflict {
+        path: PathBuf,
+    },
+    HostSkillConflictInspection {
+        path: PathBuf,
+        source: io::Error,
+    },
     Load(LoadProfileError),
     Preflight(PreflightError),
     Plan(RuntimePlanError),
@@ -379,6 +406,16 @@ impl fmt::Display for AgentCommandError {
                 formatter,
                 "host command '{command}' is unavailable: {source}"
             ),
+            Self::HostSkillConflict { path } => write!(
+                formatter,
+                "refusing to shadow or overwrite the existing Host Skill at '{}'; remove or rename it before enabling the Cloister Host bridge",
+                path.display()
+            ),
+            Self::HostSkillConflictInspection { path, source } => write!(
+                formatter,
+                "failed to inspect the Host Skill conflict path '{}': {source}",
+                path.display()
+            ),
             Self::Load(error) => error.fmt(formatter),
             Self::Preflight(error) => error.fmt(formatter),
             Self::Plan(error) => error.fmt(formatter),
@@ -405,6 +442,8 @@ impl Error for AgentCommandError {
             Self::GuestProxy(error) => Some(error),
             Self::HomeDirectoryMissing => None,
             Self::HostExecutable { source, .. } => Some(source),
+            Self::HostSkillConflict { .. } => None,
+            Self::HostSkillConflictInspection { source, .. } => Some(source),
             Self::Load(error) => Some(error),
             Self::Preflight(error) => Some(error),
             Self::Plan(error) => Some(error),

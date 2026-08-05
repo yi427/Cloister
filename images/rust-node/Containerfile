@@ -9,6 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         bash \
+        bubblewrap \
         build-essential \
         ca-certificates \
         curl \
@@ -52,10 +53,17 @@ RUN groupadd --gid 10001 cloister \
     && mkdir -p /workspace /cloister/agents/codex /cloister/agents/claude \
     && chown -R cloister:cloister /workspace /cloister
 
-COPY entrypoint.sh /usr/local/bin/cloister-entrypoint
-COPY profile.sh /etc/profile.d/cloister.sh
-RUN chmod 0755 /usr/local/bin/cloister-entrypoint \
-    && chmod 0644 /etc/profile.d/cloister.sh
+COPY images/rust-node/entrypoint.sh /usr/local/bin/cloister-entrypoint
+COPY images/rust-node/profile.sh /etc/profile.d/cloister.sh
+COPY skills/host-exec /usr/local/share/cloister/skills/host-exec
+RUN mkdir -p \
+        /usr/local/share/cloister/claude-skill-root/.claude/skills \
+    && ln -s \
+        /usr/local/share/cloister/skills/host-exec \
+        /usr/local/share/cloister/claude-skill-root/.claude/skills/host-exec \
+    && chmod 0755 /usr/local/bin/cloister-entrypoint \
+    && chmod 0644 /etc/profile.d/cloister.sh \
+    && chmod -R a+rX /usr/local/share/cloister
 
 ENV HOME=/tmp/cloister/home
 ENV CARGO_HOME=/tmp/cloister/cargo

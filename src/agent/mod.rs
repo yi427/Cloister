@@ -78,6 +78,13 @@ pub trait AgentAdapter {
     /// Environment variable through which the agent discovers its state.
     fn state_environment(&self) -> &'static str;
 
+    /// Persistent-state path that would shadow Cloister's canonical Host Skill.
+    ///
+    /// Agents without a persistent discovery path return `None`.
+    fn host_skill_conflict_path(&self) -> Option<&'static Path> {
+        None
+    }
+
     /// Builds only the guest agent command, without Apple container arguments.
     fn build_command(
         &self,

@@ -6,6 +6,8 @@ use serde_json::json;
 
 use super::{AgentAdapter, AgentCommand, AgentHostBridge};
 
+const HOST_SKILL_DISCOVERY_ROOT: &str = "/usr/local/share/cloister/claude-skill-root";
+
 /// Adapter for the Claude Code CLI bundled in the Cloister image.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ClaudeAgent;
@@ -27,6 +29,10 @@ impl AgentAdapter for ClaudeAgent {
         "CLAUDE_CONFIG_DIR"
     }
 
+    fn host_skill_conflict_path(&self) -> Option<&'static Path> {
+        Some(Path::new("skills/host-exec"))
+    }
+
     fn build_command(
         &self,
         host_bridge: Option<AgentHostBridge<'_>>,
@@ -34,6 +40,8 @@ impl AgentAdapter for ClaudeAgent {
     ) -> AgentCommand {
         let mut command_arguments = Vec::new();
         if let Some(bridge) = host_bridge {
+            command_arguments.push(OsString::from("--add-dir"));
+            command_arguments.push(OsString::from(HOST_SKILL_DISCOVERY_ROOT));
             let authorization = format!("Bearer ${{{}}}", bridge.bearer_token_environment());
             let config = json!({
                 "mcpServers": {
@@ -62,7 +70,7 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::ClaudeAgent;
+    use super::{ClaudeAgent, HOST_SKILL_DISCOVERY_ROOT};
     use crate::agent::{AgentAdapter, AgentHostBridge};
 
     #[test]
@@ -84,9 +92,11 @@ mod tests {
         let command = ClaudeAgent.build_command(Some(bridge), &forwarded);
 
         assert_eq!(command.executable(), OsStr::new("claude"));
-        assert_eq!(command.arguments()[0], "--mcp-config");
+        assert_eq!(command.arguments()[0], "--add-dir");
+        assert_eq!(command.arguments()[1], HOST_SKILL_DISCOVERY_ROOT);
+        assert_eq!(command.arguments()[2], "--mcp-config");
         let config: Value = serde_json::from_str(
-            command.arguments()[1]
+            command.arguments()[3]
                 .to_str()
                 .expect("generated MCP JSON should be UTF-8"),
         )

@@ -46,6 +46,8 @@ policy, or long-running workload.
   compatibility expected by common development and agent tools.
 - Pin the base image by digest and pin agent CLI versions in reproducible image
   builds.
+- Install Debian's `bubblewrap` package so Codex can use the supported Linux
+  sandbox executable from `PATH` instead of its bundled compatibility fallback.
 - Run the interactive agent as an unprivileged guest user.
 - Make the guest root filesystem read-only where practical and provide explicit
   writable mounts for temporary files, workspace data, and isolated agent state.

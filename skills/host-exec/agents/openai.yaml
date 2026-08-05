@@ -1,0 +1,9 @@
+interface:
+  display_name: "Cloister Host Exec"
+  short_description: "Use Profile-governed host commands safely"
+  default_prompt: "Use $host-exec to run an allowed command on the macOS host."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "cloister_host"
+      description: "Authenticated Profile-governed host command bridge"

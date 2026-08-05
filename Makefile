@@ -1,5 +1,7 @@
 IMAGE_TAG ?= cloister:dev
-IMAGE_CONTEXT := images/rust-node
+IMAGE_CONTEXT := .
+IMAGE_FILE := images/rust-node/Containerfile
+IMAGE_SCRIPTS := images/rust-node
 
 .PHONY: format format-check verify image image-check install-hooks
 
@@ -15,12 +17,13 @@ verify: format-check image-check
 	cargo clippy --all-targets -- -D warnings
 
 image-check:
-	sh -n $(IMAGE_CONTEXT)/entrypoint.sh
+	sh -n $(IMAGE_SCRIPTS)/entrypoint.sh
+	test -f skills/host-exec/SKILL.md
 
 image:
 	container build \
 		--arch arm64 \
-		--file $(IMAGE_CONTEXT)/Containerfile \
+		--file $(IMAGE_FILE) \
 		--progress plain \
 		--tag $(IMAGE_TAG) \
 		$(IMAGE_CONTEXT)

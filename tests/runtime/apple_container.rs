@@ -348,6 +348,7 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     let debug = format!("{plan:?}");
     assert!(display.contains("Host capabilities: host.list_commands, host.exec"));
     assert!(display.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
+    assert!(display.contains("Host Skill: host-exec (canonical read-only image source)"));
     assert!(display.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
     assert!(display.contains("[REDACTED]"));
     assert!(!display.contains(token));

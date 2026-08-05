@@ -1,0 +1,9 @@
+*
+!images/
+!images/rust-node/
+!images/rust-node/Containerfile
+!images/rust-node/entrypoint.sh
+!images/rust-node/profile.sh
+!skills/
+!skills/host-exec/
+!skills/host-exec/**
