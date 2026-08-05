@@ -64,7 +64,7 @@ changing these boundaries.
 
 - Apple silicon Mac
 - Apple `container` 1.2 or newer
-- Rust 1.97.1 or newer with Cargo for the 0.1.x source installation
+- Rust 1.97.1 or newer with Cargo for direct source installation
 - a Linux ARM64 Cloister image matching the CLI release
 
 Install Apple's signed package from the
@@ -72,8 +72,16 @@ Install Apple's signed package from the
 
 ## Installation
 
-Cloister 0.1.x is installed from an exact Git tag and compiled locally. The
-first release does not provide a prebuilt binary or Homebrew formula.
+Cloister 0.1.x is available from the official Homebrew tap. Homebrew installs
+the Apple `container` dependency and builds Cloister from the immutable release
+source. It does not start the runtime, create a Profile, or pull the guest
+image.
+
+```sh
+brew install yi427/tap/cloister
+```
+
+Alternatively, install directly from the exact Git tag with Cargo:
 
 ```sh
 cargo install --locked \
@@ -344,7 +352,8 @@ policy.
 Cloister 0.1.x intentionally does not provide:
 
 - Intel Mac, Linux-host, Docker, or general-purpose container-runtime support;
-- a GUI or transparent bidirectional file synchronization;
+- a GUI, prebuilt standalone CLI binary, or transparent bidirectional file
+  synchronization;
 - automatic migration of incompatible Profile versions;
 - argument-level Host Exec restrictions beyond `arguments = "any"`;
 - host-level CPU, memory, filesystem, or network containment for Host Exec;
