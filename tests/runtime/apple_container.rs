@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
     fs,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
@@ -303,7 +304,13 @@ fn shared_codex_state_requires_a_host_directory() {
 #[test]
 fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     let path = fixture("valid/default.toml");
-    let profile = load_profile(&path).expect("default profile should load");
+    let directory = tempdir().expect("temporary directory should exist");
+    let host_command = directory.path().join("xcodebuild");
+    fs::write(&host_command, "#!/bin/sh\nexit 0\n").expect("fake host command should be written");
+    fs::set_permissions(&host_command, fs::Permissions::from_mode(0o755))
+        .expect("fake host command should be executable");
+    let mut profile = load_profile(&path).expect("default profile should load");
+    profile.host.exec.allow[0].executable = host_command.clone();
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let endpoint = "http://host.container.internal:17834/mcp";
@@ -358,7 +365,10 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     )));
     assert!(display.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
     assert!(display.contains("Host Skill: host-exec (canonical read-only image source)"));
-    assert!(display.contains("xcodebuild: declared '/usr/bin/xcodebuild'"));
+    assert!(display.contains(&format!(
+        "xcodebuild: declared '{}'",
+        host_command.display()
+    )));
     assert!(display.contains("[REDACTED]"));
     assert!(!display.contains(token));
     assert!(!debug.contains(token));
