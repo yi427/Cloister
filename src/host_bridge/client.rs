@@ -9,11 +9,14 @@ use rmcp::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::error::message;
 
-use super::{BridgeToken, HostExecOutput, HostExecRequest, HostListCommandsOutput};
+use super::{
+    BridgeToken, HostExecCancelOutput, HostExecCancelRequest, HostExecOutput, HostExecRequest,
+    HostExecStatusOutput, HostExecStatusRequest, HostListCommandsOutput,
+};
 
 /// Calls structured `host.exec` through an authenticated MCP endpoint.
 pub async fn call_host_exec(
@@ -21,12 +24,37 @@ pub async fn call_host_exec(
     token: &BridgeToken,
     request: &HostExecRequest,
 ) -> Result<HostExecOutput, HostBridgeClientError> {
-    let arguments = serde_json::to_value(request)
-        .expect("HostExecRequest should serialize")
-        .as_object()
-        .cloned()
-        .expect("host.exec arguments are an object");
-    call_tool(endpoint, token, "host.exec", arguments).await
+    call_tool(endpoint, token, "host.exec", request_arguments(request)).await
+}
+
+/// Reads incremental output and lifecycle state for one Host Exec execution.
+pub async fn call_host_exec_status(
+    endpoint: &str,
+    token: &BridgeToken,
+    request: &HostExecStatusRequest,
+) -> Result<HostExecStatusOutput, HostBridgeClientError> {
+    call_tool(
+        endpoint,
+        token,
+        "host.exec_status",
+        request_arguments(request),
+    )
+    .await
+}
+
+/// Requests cancellation of one Host Exec execution and its process group.
+pub async fn call_host_exec_cancel(
+    endpoint: &str,
+    token: &BridgeToken,
+    request: &HostExecCancelRequest,
+) -> Result<HostExecCancelOutput, HostBridgeClientError> {
+    call_tool(
+        endpoint,
+        token,
+        "host.exec_cancel",
+        request_arguments(request),
+    )
+    .await
 }
 
 /// Calls read-only `host.list_commands` through an authenticated MCP endpoint.
@@ -82,6 +110,14 @@ async fn call_tool<T: DeserializeOwned>(
         .structured_content
         .ok_or(HostBridgeClientError::InvalidResponse)?;
     serde_json::from_value(structured).map_err(|_| HostBridgeClientError::InvalidResponse)
+}
+
+fn request_arguments<T: Serialize>(request: &T) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::to_value(request)
+        .expect("Host MCP request should serialize")
+        .as_object()
+        .cloned()
+        .expect("Host MCP arguments are an object")
 }
 
 /// Failure while connecting to or invoking the host bridge.

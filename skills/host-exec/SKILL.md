@@ -34,20 +34,31 @@ Profile returned by the bridge as the authority for the entire bridge session.
    example. Pass every argument as a separate literal string. Do not provide an
    executable path, working directory, environment, shell command string, or
    any extra field.
-5. Wait for the synchronous result. Report `stdout`, `stderr`, `exit_code`, and
-   `duration_ms` accurately. Keep empty streams distinct from unavailable
-   fields. Treat a nonzero exit code as a completed command result, not as an
-   MCP transport failure.
+5. Read the returned `execution_id`, `state`, output `chunks`, `next_cursor`,
+   byte counts, truncation flag, `exit_code`, and `duration_ms`. Preserve each
+   chunk's `stdout` or `stderr` stream when reporting it.
+6. While `state` is `running`, call `host.exec_status` with the returned
+   `execution_id` and the last `next_cursor`. Use bounded backoff between polls:
+   start near 250 ms and cap at 1 second. Process only chunks after the supplied
+   cursor so output is not duplicated.
+7. Stop polling at `completed`, `failed`, or `cancelled`. Treat a nonzero exit
+   code in `completed` as a completed command result, not an MCP transport
+   failure. Keep empty streams distinct from unavailable fields, and report
+   `output_truncated = true` when the bridge could not retain all output.
+8. If a running operation is no longer wanted, call `host.exec_cancel` with its
+   `execution_id`, then continue status polling until a terminal state confirms
+   cleanup. Do not assume the immediate cancellation response is terminal.
 
 ## Handle approval and failure
 
 - Let the client present any execution approval required for `host.exec`.
   State that a prompt appeared only when one was actually observed. Distinguish
   user denial, Profile denial, process-start failure, and a completed nonzero
-  exit code.
-- If `host.list_commands` or `host.exec` fails, report the error without using
-  Bash, a terminal, another MCP server, or another execution tool as a fallback.
-  Ask the user before changing to a different execution path.
+  exit code. `host.exec_status` and `host.exec_cancel` should not require a
+  second execution approval.
+- If any Cloister Host MCP tool fails, report the error without using Bash, a
+  terminal, another MCP server, or another execution tool as a fallback. Ask
+  the user before changing to a different execution path.
 - Do not call a command that is absent from discovery merely to provoke a
   predictable denial. An explicit user request to test the rejection path is
   the only exception; report the denial and do not attempt a bypass.

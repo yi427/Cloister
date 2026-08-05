@@ -1,6 +1,14 @@
 //! Host capability bridge commands.
 
-use std::{env, error::Error, fmt, io, net::SocketAddr, path::PathBuf};
+use std::{
+    env,
+    error::Error,
+    fmt,
+    io::{self, Write},
+    net::SocketAddr,
+    path::PathBuf,
+    time::Duration,
+};
 
 use clap::{Args, Subcommand, ValueHint};
 use tokio::net::TcpListener;
@@ -11,7 +19,8 @@ use crate::{
     host_bridge::{
         BridgeToken, BridgeTokenError, HOST_EXEC_DSL_VERSION, HostBridgeClientError,
         HostBridgeServerError, HostExecPolicy, HostExecPolicyBuildError, HostExecRequest,
-        call_host_exec, serve,
+        HostExecStatusRequest, HostExecutionState, HostOutputChunk, HostOutputStream,
+        call_host_exec, call_host_exec_status, serve,
     },
     preflight::{
         HostExecutableCheckError, PreflightError, inspect_host_executable, resolve_launch,
@@ -133,7 +142,7 @@ async fn serve_command(
     );
     println!("Working directory: {}", resolved.workspace().display());
     println!("Token file: {}", token_file.display());
-    println!("Tools: host.list_commands, host.exec");
+    println!("Tools: host.list_commands, host.exec, host.exec_status, host.exec_cancel");
     println!("Allowed commands: {}", policy.command_count());
 
     let server = serve(
@@ -165,7 +174,7 @@ async fn exec_command(
     arguments: Vec<String>,
 ) -> Result<(), HostCommandError> {
     let token = BridgeToken::load(token_file)?;
-    let output = call_host_exec(
+    let mut output = call_host_exec(
         endpoint,
         &token,
         &HostExecRequest {
@@ -176,16 +185,46 @@ async fn exec_command(
     )
     .await?;
 
-    print!("{}", output.stdout);
-    eprint!("{}", output.stderr);
+    print_chunks(&output.chunks)?;
+    let mut cursor = output.next_cursor;
+    let mut poll_interval = Duration::from_millis(250);
+    while output.state == HostExecutionState::Running {
+        tokio::time::sleep(poll_interval).await;
+        output = call_host_exec_status(
+            endpoint,
+            &token,
+            &HostExecStatusRequest {
+                execution_id: output.execution_id.clone(),
+                cursor: Some(cursor),
+            },
+        )
+        .await?;
+        print_chunks(&output.chunks)?;
+        cursor = output.next_cursor;
+        poll_interval = poll_interval.saturating_mul(2).min(Duration::from_secs(1));
+    }
 
-    if output.exit_code == Some(0) {
+    if output.state == HostExecutionState::Completed && output.exit_code == Some(0) {
         Ok(())
     } else {
         Err(HostCommandError::HostExec {
+            state: output.state,
             exit_code: output.exit_code,
         })
     }
+}
+
+fn print_chunks(chunks: &[HostOutputChunk]) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    for chunk in chunks {
+        match chunk.stream {
+            HostOutputStream::Stdout => stdout.write_all(chunk.text.as_bytes())?,
+            HostOutputStream::Stderr => stderr.write_all(chunk.text.as_bytes())?,
+        }
+    }
+    stdout.flush()?;
+    stderr.flush()
 }
 
 #[derive(Debug)]
@@ -210,10 +249,12 @@ pub(super) enum HostCommandError {
     },
     Server(HostBridgeServerError),
     Client(HostBridgeClientError),
+    Output(io::Error),
     Signal {
         detail: String,
     },
     HostExec {
+        state: HostExecutionState,
         exit_code: Option<i32>,
     },
 }
@@ -250,12 +291,13 @@ impl fmt::Display for HostCommandError {
             ),
             Self::Server(error) => error.fmt(formatter),
             Self::Client(error) => error.fmt(formatter),
+            Self::Output(error) => write!(formatter, "failed to write Host Exec output: {error}"),
             Self::Signal { detail } => {
                 write!(formatter, "{}: {detail}", message::BRIDGE_SIGNAL_FAILED)
             }
-            Self::HostExec { exit_code } => write!(
+            Self::HostExec { state, exit_code } => write!(
                 formatter,
-                "{} with exit code {exit_code:?}",
+                "{} with state {state:?} and exit code {exit_code:?}",
                 message::HOST_EXEC_FAILED
             ),
         }
@@ -274,6 +316,7 @@ impl Error for HostCommandError {
             Self::Listen { source, .. } => Some(source),
             Self::Server(error) => Some(error),
             Self::Client(error) => Some(error),
+            Self::Output(error) => Some(error),
             Self::HomeDirectoryMissing
             | Self::HostExecDisabled
             | Self::NonLoopback { .. }
@@ -292,6 +335,12 @@ impl From<BridgeTokenError> for HostCommandError {
 impl From<HostBridgeClientError> for HostCommandError {
     fn from(error: HostBridgeClientError) -> Self {
         Self::Client(error)
+    }
+}
+
+impl From<io::Error> for HostCommandError {
+    fn from(error: io::Error) -> Self {
+        Self::Output(error)
     }
 }
 

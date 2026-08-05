@@ -263,6 +263,7 @@ dependencies = [
  "clap",
  "garde",
  "getrandom",
+ "libc",
  "rmcp",
  "schemars",
  "serde",

@@ -74,11 +74,11 @@ boundaries are needed.
 [`ADR 0004`](0004-profile-governed-host-execution.md) replaces this runtime with
 a Profile V5 executable allowlist, structured argument vectors, environment
 policy, and command discovery. Those enforcement pieces are connected. Its
-asynchronous execution status, cancellation, Skill, dynamic schema enumeration,
-and JSONL auditing remain incomplete.
+asynchronous execution status, cancellation, process-group cleanup, and Skill
+are also connected. Dynamic schema enumeration and JSONL auditing remain
+incomplete.
 
 ## Deferred
 
 Cloister does not yet create or repair the privileged Apple localhost DNS rule.
-The successor does not yet implement asynchronous job management or persistent
-audit storage.
+The successor does not yet implement persistent audit storage.

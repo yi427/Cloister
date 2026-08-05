@@ -111,8 +111,11 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("Host bridge token: ephemeral, forwarded, and redacted"));
     assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
     assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
-    assert!(stdout.contains("enabled_tools=[\\\"host.list_commands\\\",\\\"host.exec\\\"]"));
-    assert!(stdout.contains("default_tools_approval_mode=\\\"prompt\\\""));
+    assert!(stdout.contains(
+        "enabled_tools=[\\\"host.list_commands\\\",\\\"host.exec\\\",\\\"host.exec_status\\\",\\\"host.exec_cancel\\\"]"
+    ));
+    assert!(stdout.contains("default_tools_approval_mode=\\\"auto\\\""));
+    assert!(stdout.contains("tools.\\\"host.exec\\\".approval_mode=\\\"prompt\\\""));
     assert!(stdout.contains("\"cloister:dev\""));
     assert!(!state.exists(), "dry-run must not create agent state");
 }
@@ -390,7 +393,8 @@ fn starts_the_default_bridge_and_forwards_only_the_token_name() {
     )));
     assert!(stdout.contains("CLOISTER_HOST_BRIDGE_TOKEN"));
     assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
-    assert!(stdout.contains("default_tools_approval_mode=\"prompt\""));
+    assert!(stdout.contains("default_tools_approval_mode=\"auto\""));
+    assert!(stdout.contains("tools.\"host.exec\".approval_mode=\"prompt\""));
     TcpListener::bind(("127.0.0.1", port)).expect("bridge port should be released after Codex");
 }
 

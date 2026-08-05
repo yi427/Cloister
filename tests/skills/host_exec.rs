@@ -14,9 +14,9 @@ fn describes_only_the_connected_host_tool_surface() {
     assert!(SKILL.contains("`cloister_host` MCP tools"));
     assert!(SKILL.contains("Call `host.list_commands`"));
     assert!(SKILL.contains("Call `host.exec`"));
-    assert!(SKILL.contains("Wait for the synchronous result"));
-    assert!(!SKILL.contains("host.exec_status"));
-    assert!(!SKILL.contains("host.exec_cancel"));
+    assert!(SKILL.contains("call `host.exec_status`"));
+    assert!(SKILL.contains("call `host.exec_cancel`"));
+    assert!(SKILL.contains("start near 250 ms and cap at 1 second"));
 }
 
 #[test]

@@ -1,15 +1,16 @@
 //! Profile-governed tools exposed through the Host MCP bridge.
 
-use std::{error::Error, fmt, io, path::Path, process::Stdio, time::Instant};
+use std::{path::Path, sync::Arc};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{error::message, profile::HostExecArguments};
+use crate::profile::HostExecArguments;
 
 use super::{
-    HOST_EXEC_DSL_VERSION, HostExecAuthorizationError, HostExecPolicy, HostExecRequest,
-    build_host_process,
+    HOST_EXEC_DSL_VERSION, HostExecCancelOutput, HostExecCancelRequest, HostExecOutput,
+    HostExecPolicy, HostExecRequest, HostExecStatusOutput, HostExecStatusRequest,
+    execution::{ExecutionError, ExecutionManager},
 };
 
 /// Read-only description of the immutable Host Exec policy.
@@ -34,15 +35,6 @@ pub struct HostCommandInfo {
 pub struct HostEnvironmentInfo {
     pub mode: String,
     pub variable_names: Vec<String>,
-}
-
-/// Structured output returned by the synchronous `host.exec` tool.
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-pub struct HostExecOutput {
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: Option<i32>,
-    pub duration_ms: u64,
 }
 
 pub(super) fn host_list_commands(policy: &HostExecPolicy) -> HostListCommandsOutput {
@@ -70,62 +62,26 @@ pub(super) fn host_list_commands(policy: &HostExecPolicy) -> HostListCommandsOut
 }
 
 pub(super) async fn host_exec(
+    executions: &Arc<ExecutionManager>,
     policy: &HostExecPolicy,
     request: &HostExecRequest,
     working_directory: &Path,
-) -> Result<HostExecOutput, HostToolError> {
-    let authorized = policy
-        .authorize(request)
-        .map_err(HostToolError::Authorization)?;
-    let command_name = authorized.command_name().to_owned();
-    let started = Instant::now();
-    let mut process = build_host_process(&authorized);
-    process
-        .current_dir(working_directory)
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
-    let output = process
-        .output()
-        .await
-        .map_err(|source| HostToolError::Spawn {
-            command: command_name,
-            source,
-        })?;
-
-    Ok(HostExecOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: output.status.code(),
-        duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-    })
+) -> Result<HostExecOutput, ExecutionError> {
+    executions.start(policy, request, working_directory).await
 }
 
-#[derive(Debug)]
-pub(super) enum HostToolError {
-    Authorization(HostExecAuthorizationError),
-    Spawn { command: String, source: io::Error },
+pub(super) fn host_exec_status(
+    executions: &ExecutionManager,
+    request: &HostExecStatusRequest,
+) -> Result<HostExecStatusOutput, ExecutionError> {
+    executions.status(request)
 }
 
-impl fmt::Display for HostToolError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Authorization(source) => source.fmt(formatter),
-            Self::Spawn { command, source } => write!(
-                formatter,
-                "{} {command:?}: {source}",
-                message::HOST_EXEC_SPAWN_FAILED
-            ),
-        }
-    }
-}
-
-impl Error for HostToolError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Authorization(source) => Some(source),
-            Self::Spawn { source, .. } => Some(source),
-        }
-    }
+pub(super) fn host_exec_cancel(
+    executions: &ExecutionManager,
+    request: &HostExecCancelRequest,
+) -> Result<HostExecCancelOutput, ExecutionError> {
+    executions.cancel(request)
 }
 
 #[cfg(test)]
@@ -136,7 +92,10 @@ mod tests {
 
     use super::{host_exec, host_list_commands};
     use crate::{
-        host_bridge::{HOST_EXEC_DSL_VERSION, HostExecPolicy, HostExecRequest},
+        host_bridge::{
+            HOST_EXEC_DSL_VERSION, HostExecPolicy, HostExecRequest, HostExecutionState,
+            HostOutputStream, execution::ExecutionManager,
+        },
         profile::{
             HostExecAllowProfile, HostExecArguments, HostExecEnvironmentMode,
             HostExecEnvironmentProfile, HostExecProfile,
@@ -158,7 +117,9 @@ mod tests {
             .expect("test policy should build")
             .expect("test policy should be enabled");
 
-        let output = host_exec(
+        let executions = ExecutionManager::new();
+        let mut output = host_exec(
+            &executions,
             &policy,
             &HostExecRequest {
                 version: HOST_EXEC_DSL_VERSION,
@@ -170,8 +131,34 @@ mod tests {
         .await
         .expect("authorized command should finish");
 
-        assert_eq!(output.stdout, "$(uname)\n; exit 0\n");
-        assert_eq!(output.stderr, "stderr");
+        for _ in 0..20 {
+            if output.state.is_terminal() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            output = executions
+                .status(&crate::host_bridge::HostExecStatusRequest {
+                    execution_id: output.execution_id.clone(),
+                    cursor: None,
+                })
+                .expect("execution status should exist");
+        }
+
+        assert_eq!(output.state, HostExecutionState::Completed);
+        let stdout = output
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.stream == HostOutputStream::Stdout)
+            .map(|chunk| chunk.text.as_str())
+            .collect::<String>();
+        let stderr = output
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.stream == HostOutputStream::Stderr)
+            .map(|chunk| chunk.text.as_str())
+            .collect::<String>();
+        assert_eq!(stdout, "$(uname)\n; exit 0\n");
+        assert_eq!(stderr, "stderr");
         assert_eq!(output.exit_code, Some(7));
     }
 

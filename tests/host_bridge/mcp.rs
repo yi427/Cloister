@@ -11,8 +11,10 @@ use std::{
 
 use cloister::{
     host_bridge::{
-        BridgeToken, HOST_EXEC_DSL_VERSION, HostExecPolicy, HostExecRequest, call_host_exec,
-        call_host_list_commands, serve,
+        BridgeToken, HOST_EXEC_DSL_VERSION, HostExecCancelRequest, HostExecOutput, HostExecPolicy,
+        HostExecRequest, HostExecStatusRequest, HostExecutionState, HostOutputStream,
+        call_host_exec, call_host_exec_cancel, call_host_exec_status, call_host_list_commands,
+        serve,
     },
     profile::{
         HostExecAllowProfile, HostExecArguments, HostExecEnvironmentMode,
@@ -89,6 +91,44 @@ fn request(command: &str, args: &[&str]) -> HostExecRequest {
         command: command.to_owned(),
         args: args.iter().map(|argument| (*argument).to_owned()).collect(),
     }
+}
+
+async fn wait_for_terminal(
+    endpoint: &str,
+    token: &BridgeToken,
+    mut output: HostExecOutput,
+) -> HostExecOutput {
+    let mut chunks = std::mem::take(&mut output.chunks);
+    let mut cursor = output.next_cursor;
+    for _ in 0..200 {
+        if output.state.is_terminal() {
+            output.chunks = chunks;
+            return output;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        output = call_host_exec_status(
+            endpoint,
+            token,
+            &HostExecStatusRequest {
+                execution_id: output.execution_id.clone(),
+                cursor: Some(cursor),
+            },
+        )
+        .await
+        .expect("host.exec_status should return execution state");
+        cursor = output.next_cursor;
+        chunks.append(&mut output.chunks);
+    }
+    panic!("Host Exec did not reach a terminal state")
+}
+
+fn stream_text(output: &HostExecOutput, stream: HostOutputStream) -> String {
+    output
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.stream == stream)
+        .map(|chunk| chunk.text.as_str())
+        .collect()
 }
 
 fn create_token(path: &Path) -> BridgeToken {
@@ -263,10 +303,15 @@ async fn executes_an_allowed_command_without_shell_parsing() {
     )
     .await
     .expect("host.exec should return command output");
+    let output = wait_for_terminal(&endpoint, &token, output).await;
 
-    assert_eq!(output.stdout, "$(uname)\n; exit 0\n");
+    assert_eq!(output.state, HostExecutionState::Completed);
     assert_eq!(
-        output.stderr,
+        stream_text(&output, HostOutputStream::Stdout),
+        "$(uname)\n; exit 0\n"
+    );
+    assert_eq!(
+        stream_text(&output, HostOutputStream::Stderr),
         format!(
             "stderr\n{}\n",
             fs::canonicalize(directory.path())
@@ -291,6 +336,300 @@ async fn rejects_a_command_outside_the_profile_allowlist() {
 
     assert!(error.to_string().contains("host command is not allowed"));
     stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn status_returns_only_output_after_the_requested_cursor() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("incremental-output");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf 'first-out\\n'\nprintf 'first-err\\n' >&2\nsleep 0.3\nprintf 'second-out\\n'\nprintf 'second-err\\n' >&2\n",
+    )
+    .expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("incremental", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let mut snapshot = call_host_exec(&endpoint, &token, &request("incremental", &[]))
+        .await
+        .expect("host.exec should start the command");
+    assert_eq!(snapshot.state, HostExecutionState::Running);
+    for _ in 0..20 {
+        if stream_text(&snapshot, HostOutputStream::Stdout).contains("first-out\n")
+            && stream_text(&snapshot, HostOutputStream::Stderr).contains("first-err\n")
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        snapshot = call_host_exec_status(
+            &endpoint,
+            &token,
+            &HostExecStatusRequest {
+                execution_id: snapshot.execution_id.clone(),
+                cursor: None,
+            },
+        )
+        .await
+        .expect("host.exec_status should expose first output");
+    }
+    assert_eq!(
+        stream_text(&snapshot, HostOutputStream::Stdout),
+        "first-out\n"
+    );
+    assert_eq!(
+        stream_text(&snapshot, HostOutputStream::Stderr),
+        "first-err\n"
+    );
+    let cursor = snapshot.next_cursor;
+
+    let mut later = call_host_exec_status(
+        &endpoint,
+        &token,
+        &HostExecStatusRequest {
+            execution_id: snapshot.execution_id,
+            cursor: Some(cursor),
+        },
+    )
+    .await
+    .expect("host.exec_status should accept a cursor");
+    while later.state == HostExecutionState::Running {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        later = call_host_exec_status(
+            &endpoint,
+            &token,
+            &HostExecStatusRequest {
+                execution_id: later.execution_id.clone(),
+                cursor: Some(cursor),
+            },
+        )
+        .await
+        .expect("host.exec_status should reach completion");
+    }
+
+    assert_eq!(later.state, HostExecutionState::Completed);
+    assert_eq!(
+        stream_text(&later, HostOutputStream::Stdout),
+        "second-out\n"
+    );
+    assert_eq!(
+        stream_text(&later, HostOutputStream::Stderr),
+        "second-err\n"
+    );
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn rejects_unknown_execution_ids_for_status_and_cancel() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let (endpoint, cancellation, handle) =
+        start(token.clone(), empty_policy(), directory.path()).await;
+
+    let status_error = call_host_exec_status(
+        &endpoint,
+        &token,
+        &HostExecStatusRequest {
+            execution_id: "exec_missing".to_owned(),
+            cursor: None,
+        },
+    )
+    .await
+    .expect_err("unknown status execution should fail");
+    let cancel_error = call_host_exec_cancel(
+        &endpoint,
+        &token,
+        &HostExecCancelRequest {
+            execution_id: "exec_missing".to_owned(),
+        },
+    )
+    .await
+    .expect_err("unknown cancellation execution should fail");
+
+    assert!(
+        status_error
+            .to_string()
+            .contains("unknown Host Exec execution ID")
+    );
+    assert!(
+        cancel_error
+            .to_string()
+            .contains("unknown Host Exec execution ID")
+    );
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn rejects_execution_above_the_bridge_concurrency_limit() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("long-running");
+    fs::write(&executable, "#!/bin/sh\nsleep 10\n").expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("long-running", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let mut executions = Vec::new();
+    for _ in 0..8 {
+        let output = call_host_exec(&endpoint, &token, &request("long-running", &[]))
+            .await
+            .expect("execution within the concurrency limit should start");
+        assert_eq!(output.state, HostExecutionState::Running);
+        executions.push(output);
+    }
+    let error = call_host_exec(&endpoint, &token, &request("long-running", &[]))
+        .await
+        .expect_err("execution above the concurrency limit should fail");
+    assert!(error.to_string().contains("concurrency limit reached (8"));
+
+    for output in &executions {
+        call_host_exec_cancel(
+            &endpoint,
+            &token,
+            &HostExecCancelRequest {
+                execution_id: output.execution_id.clone(),
+            },
+        )
+        .await
+        .expect("test execution should accept cancellation");
+    }
+    for output in executions {
+        let output = wait_for_terminal(&endpoint, &token, output).await;
+        assert_eq!(output.state, HostExecutionState::Cancelled);
+    }
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn cancel_terminates_descendants_that_ignore_term() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("process-tree");
+    let child_pid_file = directory.path().join("child.pid");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nchild_file=$1\n/bin/sh -c 'trap \"\" TERM; printf \"%s\\n\" \"$$\" > \"$1\"; while :; do sleep 1; done' child \"$child_file\" &\nwait\n",
+    )
+    .expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("process-tree", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(
+        &endpoint,
+        &token,
+        &request(
+            "process-tree",
+            &[child_pid_file
+                .to_str()
+                .expect("temporary path should be UTF-8")],
+        ),
+    )
+    .await
+    .expect("host.exec should start the process tree");
+    for _ in 0..100 {
+        if child_pid_file.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let child_pid: i32 = fs::read_to_string(&child_pid_file)
+        .expect("child process should write its PID")
+        .trim()
+        .parse()
+        .expect("child PID should parse");
+    assert!(process_exists(child_pid));
+
+    let cancellation_output = call_host_exec_cancel(
+        &endpoint,
+        &token,
+        &HostExecCancelRequest {
+            execution_id: output.execution_id.clone(),
+        },
+    )
+    .await
+    .expect("host.exec_cancel should accept the running execution");
+    assert_eq!(cancellation_output.state, HostExecutionState::Running);
+    let output = wait_for_terminal(&endpoint, &token, output).await;
+
+    assert_eq!(output.state, HostExecutionState::Cancelled);
+    for _ in 0..100 {
+        if !process_exists(child_pid) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !process_exists(child_pid),
+        "descendant should be terminated"
+    );
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn bridge_shutdown_cleans_up_running_process_groups() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("shutdown-tree");
+    let child_pid_file = directory.path().join("shutdown-child.pid");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nchild_file=$1\n/bin/sh -c 'trap \"\" TERM; printf \"%s\\n\" \"$$\" > \"$1\"; while :; do sleep 1; done' child \"$child_file\" &\nwait\n",
+    )
+    .expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("shutdown-tree", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(
+        &endpoint,
+        &token,
+        &request(
+            "shutdown-tree",
+            &[child_pid_file
+                .to_str()
+                .expect("temporary path should be UTF-8")],
+        ),
+    )
+    .await
+    .expect("host.exec should start the process tree");
+    assert_eq!(output.state, HostExecutionState::Running);
+    for _ in 0..100 {
+        if child_pid_file.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let child_pid: i32 = fs::read_to_string(&child_pid_file)
+        .expect("child process should write its PID")
+        .trim()
+        .parse()
+        .expect("child PID should parse");
+    assert!(process_exists(child_pid));
+
+    stop(cancellation, handle).await;
+
+    for _ in 0..100 {
+        if !process_exists(child_pid) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !process_exists(child_pid),
+        "bridge shutdown should terminate descendants"
+    );
+}
+
+fn process_exists(process_id: i32) -> bool {
+    // SAFETY: signal 0 only checks whether this numeric process ID exists.
+    let result = unsafe { libc::kill(process_id, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 #[tokio::test]

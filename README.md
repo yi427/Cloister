@@ -116,15 +116,16 @@ bridge on macOS loopback and injects it into the selected agent as
 argument policy, and inherited environment variable names without values.
 `host.exec` accepts structured `version`, `command`, and `args` fields, resolves
 the executable only from that allowlist, and passes arguments directly without
-a shell. The initial connected implementation waits synchronously for the
-process result; asynchronous status and cancellation remain a later slice.
+a shell. It returns an execution ID after a 100 ms inline window. Callers use
+`host.exec_status` with an output cursor for long-running commands and
+`host.exec_cancel` to terminate an unwanted execution and its process group.
+There is no global execution timeout.
 
 The canonical current-surface instructions for models live in
 [`skills/host-exec/SKILL.md`](skills/host-exec/SKILL.md). The Skill requires
-policy discovery before execution, literal structured arguments, accurate
-approval and result reporting, and no fallback around a denial. It deliberately
-describes only the connected `host.list_commands` and synchronous `host.exec`
-tools. The image contains one read-only canonical source. When the Host Bridge
+policy discovery before execution, literal structured arguments, bounded
+status polling, cancellation, accurate approval and result reporting, and no
+fallback around a denial. The image contains one read-only canonical source. When the Host Bridge
 is enabled, Codex receives a temporary symlink under `$HOME/.agents/skills`,
 while Claude receives an image-owned `--add-dir` whose `.claude/skills` entry
 points to the same source. Neither path writes to `CODEX_HOME` or
@@ -133,8 +134,8 @@ points to the same source. Neither path writes to `CODEX_HOME` or
 or silently shadowing either Skill. `--no-host-bridge` exposes neither path and
 does not apply that conflict check.
 
-Codex receives transient `--config` values that require the server, enable only
-`host.list_commands` and `host.exec`, and request per-call approval. Claude
+Codex receives transient `--config` values that require the server, enable all
+four Host tools, and request per-call approval only for `host.exec`. Claude
 receives a transient inline `--mcp-config`; the server is
 loaded eagerly, and only `host.exec` carries Claude's
 `anthropic/requiresUserInteraction` metadata. The bearer token exists only for
@@ -308,14 +309,15 @@ the selected Profile allowlist, but that command still has the permissions of
 the macOS user running Cloister and remains an explicit escape hatch from the
 container boundary.
 
-The active policy design and remaining asynchronous work are documented in
+The active policy design and remaining work are documented in
 [`ADR 0004`](docs/adr/0004-profile-governed-host-execution.md). It defines a
 Profile-governed executable allowlist, command discovery, structured argv,
 controlled environment inheritance, asynchronous execution status and
 cancellation, and JSONL auditing. The allowlist, discovery, structured direct
-execution, and environment inheritance are connected now. Status, cancellation,
-dynamic schema enumeration, and persistent JSONL auditing remain to be
-implemented. The canonical Skill and agent-native discovery are connected now.
+execution, environment inheritance, status, cancellation, and process-group
+cleanup are connected now. Dynamic schema enumeration and persistent JSONL
+auditing remain to be implemented. The canonical Skill and agent-native
+discovery are connected now.
 [`ADR 0002`](docs/adr/0002-host-capability-bridge.md)
 now records the superseded arbitrary-shell bridge.
 

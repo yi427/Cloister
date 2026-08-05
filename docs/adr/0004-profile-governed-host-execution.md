@@ -24,23 +24,18 @@ persisting command output or secrets.
 The first connected slice now enforces the Profile allowlist, exposes
 `host.list_commands`, accepts structured `version + command + args` requests,
 inherits the complete trusted host environment, and starts the selected
-absolute executable directly without `/bin/zsh -lc`. It returns process output
-synchronously. The asynchronous execution manager, status, cancellation,
-dynamic command enumeration in JSON Schema and persistent JSONL audit log remain
-planned portions of this accepted design. The canonical Skill and its Codex and
-Claude discovery paths are connected.
+absolute executable directly without `/bin/zsh -lc`. The asynchronous execution
+manager, incremental status, cancellation, and process-group cleanup are now
+connected. Dynamic command enumeration in JSON Schema and the persistent JSONL
+audit log remain planned portions of this accepted design. The canonical Skill
+and its Codex and Claude discovery paths are connected.
 
 ## Decision summary
 
-Cloister keeps one authenticated MCP server, `cloister_host`. The connected
-slice exposes:
+Cloister keeps one authenticated MCP server, `cloister_host`. It exposes:
 
 - `host.list_commands` discovers the commands allowed by the loaded Profile;
-- `host.exec` validates and synchronously executes one structured command
-  invocation.
-
-The asynchronous completion of this design will add:
-
+- `host.exec` validates and starts one structured command invocation;
 - `host.exec_status` reads the state and incremental output of an invocation;
 - `host.exec_cancel` terminates an invocation and its descendants.
 
@@ -249,7 +244,7 @@ the loaded command names. This improves tool selection but is not an
 authorization check. `host.exec` must independently look up and validate the
 command on every call.
 
-### `host.exec` asynchronous target
+### `host.exec`
 
 `host.exec` validates the request, starts the direct child process in a new
 process group, registers it with the execution manager, and returns an
@@ -273,11 +268,8 @@ Callers must accept either state:
 Starting a host process is the authority-increasing operation. Agent adapters
 should retain the existing per-call user-interaction behavior for `host.exec`.
 
-The currently connected slice performs the same policy validation and direct
-process construction, but waits for completion and returns `stdout`, `stderr`,
-`exit_code`, and `duration_ms` directly. It has no execution timeout. This
-synchronous response is transitional and will be replaced by the execution ID
-contract above when `host.exec_status` and `host.exec_cancel` are connected.
+The connected implementation uses a 100 ms inline response window. It has no
+execution timeout.
 
 ### `host.exec_status`
 
@@ -383,10 +375,14 @@ for hours. Therefore:
 - there is no global default execution timeout;
 - the MCP request lifetime is kept short by returning an execution ID.
 
-The execution manager also enforces implementation-defined concurrency and
-bounded retained output. Reaching the output limit marks the status as
-truncated but does not stop the process. Profile-governed concurrency, output,
-and maximum runtime limits are deferred to a later schema.
+The execution manager permits at most eight concurrent processes, retains at
+most 1 MiB of output per execution, and retains at most 128 execution records.
+It evicts the oldest terminal records as needed. Reaching the output limit marks
+the status as truncated but does not stop the process. The cancellation grace
+period is two seconds, followed by a forceful process-group kill and a bounded
+one-second cleanup wait. Bridge shutdown allows four seconds total for all
+registered executions to reach a terminal state. Profile-governed concurrency,
+output, and maximum runtime limits are deferred to a later schema.
 
 These controls prevent accidental bridge resource exhaustion. They do not
 limit CPU, memory, filesystem, or network activity performed by an allowed host
@@ -443,10 +439,9 @@ call is sufficient unless the agent reconnects to a new bridge. The Skill must
 state that command availability is an explicit host permission and that an
 allowed interpreter or build tool may still be high privilege.
 
-The semantics for the currently connected synchronous two-tool surface are now
-maintained in [`skills/host-exec/SKILL.md`](../../skills/host-exec/SKILL.md).
-They intentionally omit `host.exec_status` and `host.exec_cancel` until those
-tools exist. The image owns one read-only canonical source. With the Host Bridge
+The semantics for the connected four-tool surface are maintained in
+[`skills/host-exec/SKILL.md`](../../skills/host-exec/SKILL.md). The image owns
+one read-only canonical source. With the Host Bridge
 enabled, Codex receives a temporary `$HOME/.agents/skills` symlink and Claude
 receives an image-owned `--add-dir` containing a `.claude/skills` symlink.
 Neither adapter writes Skill files into persistent agent state, and disabling
@@ -526,10 +521,6 @@ filtering, per-project policy, host-level CPU or memory containment, network
 restrictions, persistent jobs, interactive stdin, PTY programs, or
 Profile-governed execution limits.
 
-Before this proposal becomes Accepted, implementation planning must fix and
-document:
-
-- the audit path, rotation, and retention policy;
-- completed-record retention and maximum registry size;
-- the inline response window and cancellation grace period; and
-- verified Codex and Claude approval behavior for the four-tool surface.
+The remaining decisions are the audit path, rotation and retention policy,
+dynamic command schema enumeration, and real Codex and Claude verification of
+the four-tool approval behavior.

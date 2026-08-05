@@ -239,10 +239,10 @@ impl RunningHostBridge {
     fn announce(&self, agent_name: &str) {
         println!("Host bridge: {}", self.endpoint);
         println!(
-            "Host capabilities: host.list_commands, host.exec ({} Profile-allowed command(s); macOS user permissions)",
+            "Host capabilities: host.list_commands, host.exec, host.exec_status, host.exec_cancel ({} Profile-allowed command(s); macOS user permissions)",
             self.allowed_command_count
         );
-        println!("{agent_name} MCP approval: prompt");
+        println!("{agent_name} MCP approval: prompt for host.exec only");
     }
 
     async fn shutdown(self) -> Result<(), AgentCommandError> {

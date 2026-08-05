@@ -49,11 +49,15 @@ impl AgentAdapter for CodexAgent {
             );
             push_config(
                 &mut command_arguments,
-                "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\"]",
+                "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\",\"host.exec_status\",\"host.exec_cancel\"]",
             );
             push_config(
                 &mut command_arguments,
-                "mcp_servers.cloister_host.default_tools_approval_mode=\"prompt\"",
+                "mcp_servers.cloister_host.default_tools_approval_mode=\"auto\"",
+            );
+            push_config(
+                &mut command_arguments,
+                "mcp_servers.cloister_host.tools.\"host.exec\".approval_mode=\"prompt\"",
             );
         }
         command_arguments.extend_from_slice(arguments);

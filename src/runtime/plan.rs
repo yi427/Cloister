@@ -104,7 +104,7 @@ impl fmt::Display for RuntimePlan {
             writeln!(formatter, "Host bridge: {endpoint}")?;
             writeln!(
                 formatter,
-                "Host capabilities: host.list_commands, host.exec (Profile-governed; macOS user permissions)"
+                "Host capabilities: host.list_commands, host.exec, host.exec_status, host.exec_cancel (Profile-governed; macOS user permissions)"
             )?;
             writeln!(
                 formatter,
@@ -120,7 +120,11 @@ impl fmt::Display for RuntimePlan {
                     command.resolved.display()
                 )?;
             }
-            writeln!(formatter, "{} MCP approval: prompt", self.agent_name)?;
+            writeln!(
+                formatter,
+                "{} MCP approval: prompt for host.exec only",
+                self.agent_name
+            )?;
             writeln!(
                 formatter,
                 "Host Skill: host-exec (canonical read-only image source)"

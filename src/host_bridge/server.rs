@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::message;
 
-use super::{BridgeToken, HostExecPolicy, tools};
+use super::{BridgeToken, HostExecPolicy, execution::ExecutionManager, tools};
 
 const ALLOWED_MCP_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "host.container.internal"];
 const REQUIRES_USER_INTERACTION: &str = "anthropic/requiresUserInteraction";
@@ -33,11 +33,16 @@ const REQUIRES_USER_INTERACTION: &str = "anthropic/requiresUserInteraction";
 struct HostBridgeService {
     policy: Arc<HostExecPolicy>,
     working_directory: Arc<PathBuf>,
+    executions: Arc<ExecutionManager>,
     tool_router: ToolRouter<Self>,
 }
 
 impl HostBridgeService {
-    fn new(policy: Arc<HostExecPolicy>, working_directory: Arc<PathBuf>) -> Self {
+    fn new(
+        policy: Arc<HostExecPolicy>,
+        working_directory: Arc<PathBuf>,
+        executions: Arc<ExecutionManager>,
+    ) -> Self {
         let mut tool_router = Self::tool_router();
         let host_exec = tool_router
             .map
@@ -53,6 +58,7 @@ impl HostBridgeService {
         Self {
             policy,
             working_directory,
+            executions,
             tool_router,
         }
     }
@@ -78,12 +84,18 @@ impl HostBridgeService {
         Parameters(input): Parameters<super::HostExecRequest>,
     ) -> Result<Json<super::HostExecOutput>, String> {
         let started = std::time::Instant::now();
-        let result = tools::host_exec(&self.policy, &input, &self.working_directory).await;
+        let result = tools::host_exec(
+            &self.executions,
+            &self.policy,
+            &input,
+            &self.working_directory,
+        )
+        .await;
 
         match &result {
             Ok(output) => eprintln!(
-                "audit capability=host.exec command={:?} outcome=completed exit_code={:?} duration_ms={}",
-                input.command, output.exit_code, output.duration_ms
+                "audit capability=host.exec command={:?} outcome=started execution_id={:?} state={:?} duration_ms={}",
+                input.command, output.execution_id, output.state, output.duration_ms
             ),
             Err(error) => eprintln!(
                 "audit capability=host.exec command={:?} outcome=failed duration_ms={} error={error}",
@@ -94,13 +106,40 @@ impl HostBridgeService {
 
         result.map(Json).map_err(|error| error.to_string())
     }
+
+    #[tool(
+        name = "host.exec_status",
+        description = "Read the current state and incremental retained output of a Host Exec execution",
+        annotations(read_only_hint = true)
+    )]
+    async fn host_exec_status(
+        &self,
+        Parameters(input): Parameters<super::HostExecStatusRequest>,
+    ) -> Result<Json<super::HostExecStatusOutput>, String> {
+        tools::host_exec_status(&self.executions, &input)
+            .map(Json)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "host.exec_cancel",
+        description = "Request cancellation of a running Host Exec execution and its process group"
+    )]
+    async fn host_exec_cancel(
+        &self,
+        Parameters(input): Parameters<super::HostExecCancelRequest>,
+    ) -> Result<Json<super::HostExecCancelOutput>, String> {
+        tools::host_exec_cancel(&self.executions, &input)
+            .map(Json)
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for HostBridgeService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Call host.list_commands before host.exec. host.exec runs only Profile-allowed executables, passes args literally without a shell, and still uses the permissions of the macOS user running this bridge.",
+            "Call host.list_commands before host.exec. host.exec starts only Profile-allowed executables and returns an execution ID. Poll host.exec_status with its cursor while the state is running, and call host.exec_cancel when a running execution is no longer needed. Arguments are passed literally without a shell, and host processes still use the permissions of the macOS user running this bridge.",
         )
     }
 }
@@ -142,12 +181,15 @@ pub async fn serve(
 
     let policy = Arc::new(policy);
     let working_directory = Arc::new(working_directory);
+    let executions = ExecutionManager::new();
+    let service_executions = Arc::clone(&executions);
     let service: StreamableHttpService<HostBridgeService, LocalSessionManager> =
         StreamableHttpService::new(
             move || {
                 Ok(HostBridgeService::new(
                     Arc::clone(&policy),
                     Arc::clone(&working_directory),
+                    Arc::clone(&service_executions),
                 ))
             },
             Default::default(),
@@ -161,10 +203,11 @@ pub async fn serve(
         .nest_service("/mcp", service)
         .layer(middleware::from_fn_with_state(token, authorize));
 
-    axum::serve(listener, router)
+    let result = axum::serve(listener, router)
         .with_graceful_shutdown(cancellation.cancelled_owned())
-        .await
-        .map_err(HostBridgeServerError::Serve)
+        .await;
+    executions.shutdown().await;
+    result.map_err(HostBridgeServerError::Serve)
 }
 
 async fn authorize(State(expected): State<BridgeToken>, request: Request, next: Next) -> Response {
@@ -245,7 +288,7 @@ impl Error for HostBridgeServerError {
 mod tests {
     use std::sync::Arc;
 
-    use super::{HostBridgeService, REQUIRES_USER_INTERACTION};
+    use super::{ExecutionManager, HostBridgeService, REQUIRES_USER_INTERACTION};
     use crate::host_bridge::{HostEnvironment, HostExecPolicy};
 
     #[test]
@@ -255,6 +298,7 @@ mod tests {
         let service = HostBridgeService::new(
             Arc::new(policy),
             Arc::new(std::env::current_dir().expect("current directory should resolve")),
+            ExecutionManager::new(),
         );
         let mut tools = service.tool_router.list_all();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
@@ -263,7 +307,15 @@ mod tests {
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, ["host.exec", "host.list_commands"]);
+        assert_eq!(
+            names,
+            [
+                "host.exec",
+                "host.exec_cancel",
+                "host.exec_status",
+                "host.list_commands"
+            ]
+        );
         let host_exec = tools
             .iter()
             .find(|tool| tool.name == "host.exec")
@@ -275,5 +327,18 @@ mod tests {
                 .and_then(|metadata| metadata.0.get(REQUIRES_USER_INTERACTION)),
             Some(&serde_json::Value::Bool(true))
         );
+        for tool in tools
+            .iter()
+            .filter(|tool| tool.name.as_ref() != "host.exec")
+        {
+            assert!(
+                tool.meta
+                    .as_ref()
+                    .and_then(|metadata| metadata.0.get(REQUIRES_USER_INTERACTION))
+                    .is_none(),
+                "{} should not request a second approval",
+                tool.name
+            );
+        }
     }
 }

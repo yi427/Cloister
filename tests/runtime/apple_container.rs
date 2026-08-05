@@ -328,8 +328,9 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
         format!("mcp_servers.cloister_host.url=\"{endpoint}\""),
         "mcp_servers.cloister_host.bearer_token_env_var=\"CLOISTER_HOST_BRIDGE_TOKEN\"".to_owned(),
         "mcp_servers.cloister_host.required=true".to_owned(),
-        "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\"]".to_owned(),
-        "mcp_servers.cloister_host.default_tools_approval_mode=\"prompt\"".to_owned(),
+        "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\",\"host.exec_status\",\"host.exec_cancel\"]".to_owned(),
+        "mcp_servers.cloister_host.default_tools_approval_mode=\"auto\"".to_owned(),
+        "mcp_servers.cloister_host.tools.\"host.exec\".approval_mode=\"prompt\"".to_owned(),
     ] {
         assert!(
             arguments
