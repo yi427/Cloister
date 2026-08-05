@@ -17,6 +17,8 @@ use cloister::{
 };
 use tempfile::tempdir;
 
+const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
+
 fn fixture(relative_path: impl AsRef<Path>) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/profiles")
@@ -53,7 +55,7 @@ fn constructs_explicit_setup_and_probe_commands() {
     assert_eq!(start.program(), OsStr::new("container"));
     assert_eq!(start.arguments(), ["system", "start"]);
 
-    let image = "ghcr.io/yi427/cloister:0.1.0";
+    let image = RELEASE_IMAGE;
     assert_eq!(
         image_inspect_command(image).arguments(),
         ["image", "inspect", image]

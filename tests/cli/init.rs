@@ -11,6 +11,8 @@ use cloister::profile::{
 };
 use tempfile::tempdir;
 
+const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
+
 const FAKE_CONTAINER: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CLOISTER_TEST_COMMAND_LOG"
 
@@ -100,7 +102,7 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
     );
     assert!(output.stderr.is_empty());
     assert_eq!(profile.name, "default");
-    assert_eq!(profile.image.reference, "ghcr.io/yi427/cloister:0.1.0");
+    assert_eq!(profile.image.reference, RELEASE_IMAGE);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.to_string(), "8G");
     assert_eq!(profile.agent.state, AgentState::Shared);
@@ -139,19 +141,19 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
         stdout.contains("Host exec policy: enabled, inherit-all environment, 0 allowed command(s)")
     );
     assert!(stdout.contains("Running: container system start"));
-    assert!(
-        stdout.contains("Running: container image pull --arch arm64 ghcr.io/yi427/cloister:0.1.0")
-    );
+    assert!(stdout.contains(&format!(
+        "Running: container image pull --arch arm64 {RELEASE_IMAGE}"
+    )));
     assert!(stdout.contains(
         "Running: sudo container system dns create host.container.internal --localhost 203.0.113.113"
     ));
     assert!(stdout.contains("[PASS] Profile: 'default'"));
-    assert!(stdout.contains("[PASS] Image: 'ghcr.io/yi427/cloister:0.1.0' (linux/arm64)"));
+    assert!(stdout.contains(&format!("[PASS] Image: '{RELEASE_IMAGE}' (linux/arm64)")));
     assert!(stdout.ends_with("All checks passed.\n"));
 
     let commands = fs::read_to_string(command_log).expect("command log should be readable");
     assert!(commands.contains("system start"));
-    assert!(commands.contains("image pull --arch arm64 ghcr.io/yi427/cloister:0.1.0"));
+    assert!(commands.contains(&format!("image pull --arch arm64 {RELEASE_IMAGE}")));
     assert!(commands.contains(
         "sudo container system dns create host.container.internal --localhost 203.0.113.113"
     ));

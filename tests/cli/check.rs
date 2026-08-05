@@ -8,12 +8,16 @@ use std::{
 use cloister::profile::{HostExecAllowProfile, HostExecArguments, Profile, load_profile};
 use tempfile::tempdir;
 
-const HEALTHY_RUNTIME: &str = r#"#!/bin/sh
+const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
+const HEALTHY_RUNTIME: &str = concat!(
+    r#"#!/bin/sh
 case "$1:$2:$3" in
   system:status:--format)
     printf '%s\n' '{"apiServerVersion":"container-apiserver version 1.2.0","status":"running"}'
     ;;
-  image:inspect:cloister:dev)
+  image:inspect:ghcr.io/yi427/cloister:"#,
+    env!("CARGO_PKG_VERSION"),
+    r#")
     printf '%s\n' '[{"variants":[{"platform":{"architecture":"arm64","os":"linux"}}]}]'
     ;;
   system:dns:list)
@@ -23,7 +27,8 @@ case "$1:$2:$3" in
     exit 90
     ;;
 esac
-"#;
+"#,
+);
 
 #[test]
 fn reports_a_ready_default_environment_without_writing_state() {
@@ -52,7 +57,7 @@ fn reports_a_ready_default_environment_without_writing_state() {
             .contains("[PASS] Host policy: enabled, environment inherit-all, 0 allowed command(s)")
     );
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
-    assert!(stdout.contains("[PASS] Image: 'cloister:dev' (linux/arm64)"));
+    assert!(stdout.contains(&format!("[PASS] Image: '{RELEASE_IMAGE}' (linux/arm64)")));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
     assert!(stdout.ends_with("All checks passed.\n"));
     assert!(

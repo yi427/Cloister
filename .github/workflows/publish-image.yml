@@ -9,6 +9,8 @@ on:
     paths:
       - images/rust-node/**
       - skills/host-exec/**
+      - LICENSE-APACHE
+      - LICENSE-MIT
       - .dockerignore
       - .github/workflows/publish-image.yml
   workflow_dispatch:

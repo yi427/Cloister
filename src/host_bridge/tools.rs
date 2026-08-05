@@ -89,7 +89,9 @@ pub(super) fn host_exec_cancel(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, ffi::OsString, fs, os::unix::fs::PermissionsExt};
+    use std::{
+        collections::BTreeMap, ffi::OsString, fs, os::unix::fs::PermissionsExt, time::Duration,
+    };
 
     use tempfile::tempdir;
 
@@ -143,18 +145,19 @@ mod tests {
         .await
         .expect("authorized command should finish");
 
-        for _ in 0..20 {
-            if output.state.is_terminal() {
-                break;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !output.state.is_terminal() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                output = executions
+                    .status(&crate::host_bridge::HostExecStatusRequest {
+                        execution_id: output.execution_id.clone(),
+                        cursor: None,
+                    })
+                    .expect("execution status should exist");
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            output = executions
-                .status(&crate::host_bridge::HostExecStatusRequest {
-                    execution_id: output.execution_id.clone(),
-                    cursor: None,
-                })
-                .expect("execution status should exist");
-        }
+        })
+        .await
+        .expect("authorized command should reach a terminal state");
 
         assert_eq!(output.state, HostExecutionState::Completed);
         let stdout = output

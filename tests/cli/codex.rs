@@ -8,6 +8,8 @@ use std::{
 
 use tempfile::tempdir;
 
+const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
+
 fn write_default_profile(home: &Path) {
     let config = home.join(".config/cloister/profile.toml");
     fs::create_dir_all(config.parent().expect("config should have a parent"))
@@ -122,7 +124,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     ));
     assert!(stdout.contains("default_tools_approval_mode=\\\"auto\\\""));
     assert!(stdout.contains("tools.\\\"host.exec\\\".approval_mode=\\\"prompt\\\""));
-    assert!(stdout.contains("\"cloister:dev\""));
+    assert!(stdout.contains(&format!("\"{RELEASE_IMAGE}\"")));
     assert!(!state.exists(), "dry-run must not create agent state");
     assert!(
         !home.join(".local/state/cloister").exists(),
@@ -346,7 +348,7 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
 
     assert_eq!(output.status.code(), Some(9));
     assert!(output.stderr.is_empty());
-    assert!(stdout.ends_with("--\ncloister:dev\ncodex\n--version\n"));
+    assert!(stdout.ends_with(&format!("--\n{RELEASE_IMAGE}\ncodex\n--version\n")));
     assert_eq!(
         fs::metadata(home.join(".local/share/cloister/agents/codex"))
             .expect("state metadata should be available")

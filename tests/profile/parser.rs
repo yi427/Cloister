@@ -39,6 +39,10 @@ fn parses_the_user_facing_profile_example() {
     let example = parse_profile(EXAMPLE_PROFILE).expect("example profile should parse");
 
     assert_eq!(example.name, "default");
+    assert_eq!(
+        example.image.reference,
+        concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(example.agent.state, cloister::profile::AgentState::Shared);
 }
 

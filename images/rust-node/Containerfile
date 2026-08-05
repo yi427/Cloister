@@ -56,6 +56,7 @@ RUN groupadd --gid 10001 cloister \
 COPY images/rust-node/entrypoint.sh /usr/local/bin/cloister-entrypoint
 COPY images/rust-node/profile.sh /etc/profile.d/cloister.sh
 COPY skills/host-exec /usr/local/share/cloister/skills/host-exec
+COPY LICENSE-APACHE LICENSE-MIT /usr/local/share/cloister/licenses/
 RUN mkdir -p \
         /usr/local/share/cloister/claude-skill-root/.claude/skills \
     && ln -s \
