@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
@@ -6,12 +7,12 @@ use std::{
 
 use cloister::{
     agent::{ClaudeAgent, CodexAgent},
-    preflight::resolve_launch,
-    profile::{AgentState, load_profile},
+    preflight::{resolve_guest_proxy, resolve_launch},
+    profile::{AgentState, NetworkProxyMode, load_profile},
     runtime::{
-        HOST_BRIDGE_GUEST_NAME, HOST_BRIDGE_LOCALHOST_ADDRESS, HostBridgeLaunch, NetworkExposure,
-        dns_create_command, dns_list_command, image_inspect_command, image_pull_command,
-        plan_agent_container, system_start_command, system_status_command,
+        GuestProxyPlan, HOST_BRIDGE_GUEST_NAME, HOST_BRIDGE_LOCALHOST_ADDRESS, HostBridgeLaunch,
+        NetworkExposure, dns_create_command, dns_list_command, image_inspect_command,
+        image_pull_command, plan_agent_container, system_start_command, system_status_command,
     },
 };
 use tempfile::tempdir;
@@ -28,7 +29,7 @@ fn default_plan() -> cloister::runtime::RuntimePlan {
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
 
-    plan_agent_container(&resolved, &CodexAgent, None, None, &[])
+    plan_agent_container(&resolved, &CodexAgent, None, None, None, &[])
         .expect("default profile should produce a plan")
 }
 
@@ -151,6 +152,69 @@ fn creates_the_read_write_workspace_mount() {
 }
 
 #[test]
+fn inherits_and_redacts_a_loopback_guest_proxy() {
+    let path = fixture("valid/default.toml");
+    let mut profile = load_profile(&path).expect("default profile should load");
+    profile.network.proxy = NetworkProxyMode::Inherit;
+    let resolved =
+        resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
+    let proxy_secret = "secret-proxy-password";
+    let proxy = resolve_guest_proxy(
+        NetworkProxyMode::Inherit,
+        BTreeMap::from([
+            (
+                OsString::from("HTTPS_PROXY"),
+                OsString::from(format!("http://user:{proxy_secret}@127.0.0.1:3080")),
+            ),
+            (OsString::from("NO_PROXY"), OsString::from("example.com")),
+        ]),
+    )
+    .expect("host proxy should resolve")
+    .expect("inherit mode should produce a proxy");
+
+    let plan = plan_agent_container(&resolved, &CodexAgent, None, None, Some(&proxy), &[])
+        .expect("inherited proxy should produce a plan");
+    let forwarded_names = plan
+        .command()
+        .secret_environment_names()
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        plan.proxy(),
+        GuestProxyPlan::Inherited {
+            source_variable: "HTTPS_PROXY",
+            loopback_rewritten: true,
+        }
+    );
+    for name in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        assert!(forwarded_names.contains(&OsStr::new(name)));
+        assert!(
+            plan.command()
+                .arguments()
+                .windows(2)
+                .any(|pair| { pair[0] == "--env" && pair[1] == name })
+        );
+    }
+
+    let display = plan.to_string();
+    let debug = format!("{plan:?}");
+    assert!(display.contains(
+        "Guest proxy: inherit from HTTPS_PROXY (loopback mapped to host.container.internal; value redacted)"
+    ));
+    assert!(!display.contains(proxy_secret));
+    assert!(!debug.contains(proxy_secret));
+}
+
+#[test]
 fn rejects_a_mount_path_that_container_cannot_represent() {
     let path = fixture("valid/default.toml");
     let profile = load_profile(&path).expect("default profile should load");
@@ -159,7 +223,7 @@ fn rejects_a_mount_path_that_container_cannot_represent() {
     fs::create_dir(&workspace).expect("workspace should be created");
     let resolved = resolve_launch(profile, workspace).expect("host workspace should resolve");
 
-    let error = plan_agent_container(&resolved, &CodexAgent, None, None, &[])
+    let error = plan_agent_container(&resolved, &CodexAgent, None, None, None, &[])
         .expect_err("comma mount path should fail");
 
     assert!(error.to_string().contains("must not contain ','"));
@@ -176,7 +240,7 @@ fn appends_codex_arguments_without_shell_parsing() {
         OsString::from("model_reasoning_effort=high"),
     ];
 
-    let plan = plan_agent_container(&resolved, &CodexAgent, None, None, &arguments)
+    let plan = plan_agent_container(&resolved, &CodexAgent, None, None, None, &arguments)
         .expect("Codex launch should produce plan");
 
     assert!(plan.command().arguments().ends_with(&[
@@ -197,7 +261,7 @@ fn mounts_shared_codex_state_and_sets_codex_home() {
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let state = fixture("valid");
 
-    let plan = plan_agent_container(&resolved, &CodexAgent, Some(&state), None, &[])
+    let plan = plan_agent_container(&resolved, &CodexAgent, Some(&state), None, None, &[])
         .expect("shared Codex state should produce a plan");
     let arguments = plan.command().arguments();
     let mount = plan.agent_state().expect("Codex state should be mounted");
@@ -228,7 +292,7 @@ fn shared_codex_state_requires_a_host_directory() {
     let resolved =
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
 
-    let error = plan_agent_container(&resolved, &CodexAgent, None, None, &[])
+    let error = plan_agent_container(&resolved, &CodexAgent, None, None, None, &[])
         .expect_err("shared state without a directory should fail");
 
     assert!(error.to_string().contains("shared Codex state requires"));
@@ -248,6 +312,7 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
         &CodexAgent,
         None,
         Some(HostBridgeLaunch::new(endpoint, token)),
+        None,
         &[],
     )
     .expect("host bridge plan should be created");
@@ -298,7 +363,7 @@ fn mounts_shared_claude_state_and_sets_claude_config_dir() {
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let state = fixture("valid");
 
-    let plan = plan_agent_container(&resolved, &ClaudeAgent, Some(&state), None, &[])
+    let plan = plan_agent_container(&resolved, &ClaudeAgent, Some(&state), None, None, &[])
         .expect("shared Claude state should produce a plan");
     let arguments = plan.command().arguments();
     let mount = plan.agent_state().expect("Claude state should be mounted");
@@ -333,7 +398,7 @@ fn appends_claude_arguments_without_shell_parsing() {
         resolve_launch(profile, fixture("valid")).expect("default workspace should resolve");
     let arguments = [OsString::from("--model"), OsString::from("sonnet")];
 
-    let plan = plan_agent_container(&resolved, &ClaudeAgent, None, None, &arguments)
+    let plan = plan_agent_container(&resolved, &ClaudeAgent, None, None, None, &arguments)
         .expect("Claude launch should produce plan");
 
     assert!(plan.command().arguments().ends_with(&[

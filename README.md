@@ -85,6 +85,28 @@ as `CLAUDE_CONFIG_DIR`. Cloister creates only the selected agent's directory
 with owner-only permissions. It never mounts the host's existing `~/.codex` or
 `~/.claude`.
 
+Profile V6 makes guest proxy inheritance explicit:
+
+```toml
+[network]
+mode = "default"
+proxy = "disabled" # or "inherit"
+```
+
+`inherit` selects the first non-empty host variable in this order:
+`HTTPS_PROXY`, `https_proxy`, `ALL_PROXY`, `all_proxy`, `HTTP_PROXY`, then
+`http_proxy`. The value must be an HTTP or HTTPS URL. A loopback proxy host is
+rewritten to `host.container.internal`, the same resolved URL is exposed under
+the conventional upper- and lowercase HTTP, HTTPS, and ALL proxy variable
+names, and Cloister extends `NO_PROXY`/`no_proxy` so the Host MCP bridge stays
+direct. Proxy values are supplied only through the host `container` process
+environment while the command line contains `--env NAME`; plans, checks, and
+debug output show only the source variable and rewrite status.
+
+This exposes the proxy URL, including any embedded credentials, to processes in
+the guest. It does not store that URL in the Profile, and it is a connectivity
+setting rather than an egress firewall.
+
 When `[host.exec] enabled = true`, each command also starts an authenticated MCP
 bridge on macOS loopback and injects it into the selected agent as
 `cloister_host`. `host.list_commands` reports the immutable Profile allowlist,
@@ -159,7 +181,10 @@ cargo run -- init
 
 `init` asks for the Profile name, exact image reference, guest CPU and memory
 limits, whether agent credentials, settings, and session history should persist
-across projects, and an optional comma-separated list of host command names.
+across projects, whether a detected supported host HTTP proxy should be
+inherited, and an optional comma-separated list of host command names. The
+proxy URL itself is never printed or stored; when no supported host proxy is
+present, the generated policy is `proxy = "disabled"`.
 The policy applies to every supported agent while each agent keeps a separate
 Cloister-managed state directory. The Host Exec allowlist is empty by default.
 Only names explicitly entered by the user are resolved from absolute directories
@@ -194,6 +219,8 @@ cargo run -- check
 ```
 
 The separate `check` command is read-only. It validates the selected Profile,
+resolves the explicit guest proxy policy from the current host environment
+without printing its value or making an upstream request,
 inspects every declared Host Exec path and its canonical target, confirms that
 each target is a regular file with an execute permission bit, confirms that the
 Apple `container` service is running, verifies that the Profile's exact image
@@ -214,11 +241,11 @@ cargo run -- check --profile examples/profile.toml
 `cloister profile check <path>` remains the narrower static Profile validation
 command; it does not inspect the host runtime, image store, or DNS setup.
 
-`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. Profile V5 uses
+`XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected. Profile V6 uses
 `[agent] state = "shared"` or `"isolated"`. The latter selects temporary
 per-container state instead of cross-project persistent state. Shared state can
 contain authentication tokens, configuration, history, and skills, so it must
-be treated as a secret. Profile V5 also requires an explicit `[host.exec]`
+be treated as a secret. Profile V6 retains the explicit `[host.exec]`
 allowlist contract with `inherit-all` environment semantics. It is parsed and
 validated before launch and enforced independently by the Host MCP server on
 every execution request. Earlier Profile versions are rejected; there is no
@@ -273,6 +300,9 @@ execution, and environment inheritance are connected now. Status, cancellation,
 dynamic schema enumeration, the canonical Skill, and persistent JSONL auditing
 remain to be implemented. [`ADR 0002`](docs/adr/0002-host-capability-bridge.md)
 now records the superseded arbitrary-shell bridge.
+
+The guest proxy contract and its security consequences are documented in
+[`ADR 0005`](docs/adr/0005-inherited-guest-proxy.md).
 
 ## Project layout
 

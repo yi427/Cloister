@@ -53,9 +53,10 @@ There is no embedded fallback Profile. A missing default file is an explicit
 configuration error.
 
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` replace their respective home-relative
-base directories when set. Profile V5 controls image, resources, guest
-settings, explicit default networking, a generic `[agent]` state policy, and
-the structured host-command allowlist enforced by the ADR 0004 bridge.
+base directories when set. Profile V6 controls image, resources, guest
+settings, explicit default networking and proxy inheritance, a generic
+`[agent]` state policy, and the structured host-command allowlist enforced by
+the ADR 0004 bridge.
 That policy is either `shared` or `isolated` and applies to every supported
 agent, while each agent receives a separate Cloister-managed state directory.
 The development version deliberately rejects earlier Profile versions without

@@ -1,4 +1,4 @@
-//! Public Profile V5 model integration tests.
+//! Public Profile V6 model integration tests.
 
 use std::{collections::BTreeMap, ffi::OsString, path::Path};
 
@@ -7,13 +7,13 @@ use cloister::{
     profile::{
         AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, HostExecAllowProfile,
         HostExecArguments, HostExecEnvironmentMode, HostExecEnvironmentProfile, HostExecProfile,
-        HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION,
-        Profile,
+        HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, NetworkProxyMode,
+        PROFILE_SCHEMA_VERSION, Profile,
     },
 };
 
 #[test]
-fn constructs_profile_v5_through_the_public_api() {
+fn constructs_profile_v6_through_the_public_api() {
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
         name: "rust-default".to_owned(),
@@ -30,6 +30,7 @@ fn constructs_profile_v5_through_the_public_api() {
         },
         network: NetworkProfile {
             mode: NetworkMode::Default,
+            proxy: NetworkProxyMode::Disabled,
         },
         agent: AgentProfile {
             state: AgentState::Isolated,
@@ -50,11 +51,12 @@ fn constructs_profile_v5_through_the_public_api() {
         },
     };
 
-    assert_eq!(profile.schema_version, 5);
+    assert_eq!(profile.schema_version, 6);
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
     assert_eq!(profile.network.mode, NetworkMode::Default);
+    assert_eq!(profile.network.proxy, NetworkProxyMode::Disabled);
     assert_eq!(profile.agent.state, AgentState::Isolated);
     assert_eq!(
         profile.host.exec.environment.mode,

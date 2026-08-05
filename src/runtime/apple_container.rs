@@ -10,12 +10,15 @@ use std::{
 use crate::{
     agent::{AgentAdapter, AgentCommand, AgentHostBridge},
     error::message,
-    preflight::{HostExecutableCheckError, ResolvedLaunch, inspect_host_executable},
-    profile::{AgentState, Architecture, NetworkMode, Profile},
+    preflight::{
+        APPLE_CONTAINER_HOST_NAME, HostExecutableCheckError, ResolvedGuestProxy, ResolvedLaunch,
+        inspect_host_executable,
+    },
+    profile::{AgentState, Architecture, NetworkMode, NetworkProxyMode, Profile},
 };
 
 use super::plan::{
-    AgentStateMount, CommandSpec, HostCommandPlan, NetworkExposure, RuntimePlan,
+    AgentStateMount, CommandSpec, GuestProxyPlan, HostCommandPlan, NetworkExposure, RuntimePlan,
     SecretEnvironmentVariable, WorkspaceMount,
 };
 
@@ -26,7 +29,7 @@ const WORKSPACE_GUEST_PATH: &str = "/workspace";
 pub const APPLE_CONTAINER_PROGRAM: &str = "container";
 
 /// Guest DNS name forwarded to macOS loopback for the authenticated host bridge.
-pub const HOST_BRIDGE_GUEST_NAME: &str = "host.container.internal";
+pub const HOST_BRIDGE_GUEST_NAME: &str = APPLE_CONTAINER_HOST_NAME;
 
 /// Documentation-range address used by Apple container's localhost forwarding.
 pub const HOST_BRIDGE_LOCALHOST_ADDRESS: &str = "203.0.113.113";
@@ -123,6 +126,7 @@ pub fn plan_agent_container(
     agent: &dyn AgentAdapter,
     shared_state: Option<&Path>,
     host_bridge: Option<HostBridgeLaunch<'_>>,
+    guest_proxy: Option<&ResolvedGuestProxy>,
     agent_arguments: &[OsString],
 ) -> Result<RuntimePlan, RuntimePlanError> {
     reject_mount_separator(resolved.workspace())?;
@@ -174,12 +178,26 @@ pub fn plan_agent_container(
         None => Vec::new(),
     };
     let agent_command = agent.build_command(agent_bridge, agent_arguments);
+    let proxy = match (resolved.profile().network.proxy, guest_proxy) {
+        (NetworkProxyMode::Disabled, None) => GuestProxyPlan::Disabled,
+        (NetworkProxyMode::Inherit, Some(proxy)) => GuestProxyPlan::Inherited {
+            source_variable: proxy.source_variable(),
+            loopback_rewritten: proxy.loopback_rewritten(),
+        },
+        (NetworkProxyMode::Disabled, Some(_)) => {
+            return Err(RuntimePlanError::UnexpectedGuestProxy);
+        }
+        (NetworkProxyMode::Inherit, None) => {
+            return Err(RuntimePlanError::RequiredGuestProxyMissing);
+        }
+    };
     let command = build_run_command(
         resolved.profile(),
         &workspace,
         agent,
         agent_state.as_ref(),
         host_bridge,
+        guest_proxy,
         agent_command,
     );
 
@@ -187,6 +205,7 @@ pub fn plan_agent_container(
         profile_name: resolved.profile().name.clone(),
         agent_name: agent.display_name().to_owned(),
         network: network_exposure(resolved.profile().network.mode),
+        proxy,
         workspace,
         agent_state,
         host_bridge_endpoint: host_bridge.map(|bridge| bridge.endpoint.to_owned()),
@@ -201,6 +220,7 @@ fn build_run_command(
     agent: &dyn AgentAdapter,
     agent_state: Option<&AgentStateMount>,
     host_bridge: Option<HostBridgeLaunch<'_>>,
+    guest_proxy: Option<&ResolvedGuestProxy>,
     agent_command: AgentCommand,
 ) -> CommandSpec {
     let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
@@ -215,6 +235,21 @@ fn build_run_command(
     command.environment("LANG", &profile.guest.locale);
     command.environment("LC_ALL", &profile.guest.locale);
     command.environment("TZ", &profile.guest.timezone);
+    if let Some(proxy) = guest_proxy {
+        for name in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            command.forward_redacted_environment(name, Some(proxy.proxy_url()));
+        }
+        for name in ["NO_PROXY", "no_proxy"] {
+            command.forward_redacted_environment(name, Some(proxy.no_proxy()));
+        }
+    }
     if let Some(state) = agent_state {
         command.environment(agent.state_environment(), state.guest());
     }
@@ -300,6 +335,10 @@ impl ContainerRunCommandBuilder {
     }
 
     fn forward_secret_environment(&mut self, name: &'static str, value: Option<&str>) {
+        self.forward_redacted_environment(name, value.map(OsStr::new));
+    }
+
+    fn forward_redacted_environment(&mut self, name: &'static str, value: Option<&OsStr>) {
         self.option("--env", name);
         if let Some(value) = value {
             self.secret_environment
@@ -350,6 +389,8 @@ pub enum RuntimePlanError {
     SharedAgentStateMissing {
         agent: &'static str,
     },
+    RequiredGuestProxyMissing,
+    UnexpectedGuestProxy,
     HostExecDisabled,
     HostExecutable {
         command: String,
@@ -371,6 +412,11 @@ impl fmt::Display for RuntimePlanError {
                 "shared {agent} {}",
                 message::SHARED_AGENT_STATE_MISSING
             ),
+            Self::RequiredGuestProxyMissing => formatter
+                .write_str("Profile requires an inherited guest proxy, but none was resolved"),
+            Self::UnexpectedGuestProxy => formatter.write_str(
+                "a guest proxy was resolved for a Profile that disables proxy inheritance",
+            ),
             Self::HostExecDisabled => {
                 formatter.write_str("Host Exec is disabled by the selected Profile")
             }
@@ -388,6 +434,8 @@ impl Error for RuntimePlanError {
             Self::HostExecutable { source, .. } => Some(source),
             Self::MountPathContainsSeparator { .. }
             | Self::SharedAgentStateMissing { .. }
+            | Self::RequiredGuestProxyMissing
+            | Self::UnexpectedGuestProxy
             | Self::HostExecDisabled => None,
         }
     }

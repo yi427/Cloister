@@ -118,6 +118,11 @@ non-agent-controlled firewall or proxy and tests bypass attempts. Authentication
 endpoints, model APIs, package registries, Git remotes, telemetry, and MCP
 servers must be modeled separately.
 
+ADR 0005 later adds explicit inheritance of a host HTTP proxy for guest
+connectivity. It does not change this boundary: a default Apple container
+network is not a reachability guarantee, and forwarding a proxy is not an
+egress restriction.
+
 ## Threat boundary
 
 Cloister is intended to reduce damage from commands executed by an AI agent and

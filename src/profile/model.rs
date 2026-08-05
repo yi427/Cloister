@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 5;
+pub const PROFILE_SCHEMA_VERSION: u32 = 6;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -189,6 +189,7 @@ impl Error for ParseMemorySizeError {}
 #[serde(deny_unknown_fields)]
 pub struct NetworkProfile {
     pub mode: NetworkMode,
+    pub proxy: NetworkProxyMode,
 }
 
 /// Network modes represented by the current Profile schema.
@@ -196,6 +197,14 @@ pub struct NetworkProfile {
 #[serde(rename_all = "lowercase")]
 pub enum NetworkMode {
     Default,
+}
+
+/// Host proxy inheritance modes represented by Profile V6.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkProxyMode {
+    Disabled,
+    Inherit,
 }
 
 /// Runtime policy shared by supported coding agents.
@@ -240,7 +249,7 @@ pub struct HostExecEnvironmentProfile {
     pub mode: HostExecEnvironmentMode,
 }
 
-/// Environment modes supported by Profile V5.
+/// Environment modes supported by the current Profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostExecEnvironmentMode {
@@ -261,7 +270,7 @@ pub struct HostExecAllowProfile {
     pub arguments: HostExecArguments,
 }
 
-/// Argument policies supported by Profile V5.
+/// Argument policies supported by the current Profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostExecArguments {

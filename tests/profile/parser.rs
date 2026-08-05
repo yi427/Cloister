@@ -1,6 +1,8 @@
 //! Profile TOML parser integration tests.
 
-use cloister::profile::{Architecture, HostExecEnvironmentMode, NetworkMode, parse_profile};
+use cloister::profile::{
+    Architecture, HostExecEnvironmentMode, NetworkMode, NetworkProxyMode, parse_profile,
+};
 
 const DEFAULT_PROFILE: &str = include_str!("../fixtures/profiles/valid/default.toml");
 const INVALID_MEMORY: &str = include_str!("../fixtures/profiles/invalid/invalid-memory.toml");
@@ -13,15 +15,16 @@ const RELATIVE_HOST_EXECUTABLE: &str =
 const EXAMPLE_PROFILE: &str = include_str!("../../examples/profile.toml");
 
 #[test]
-fn parses_a_complete_profile_v5() {
+fn parses_a_complete_profile_v6() {
     let profile = parse_profile(DEFAULT_PROFILE).expect("default profile should parse");
 
-    assert_eq!(profile.schema_version, 5);
+    assert_eq!(profile.schema_version, 6);
     assert_eq!(profile.name, "rust-default");
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
     assert_eq!(profile.network.mode, NetworkMode::Default);
+    assert_eq!(profile.network.proxy, NetworkProxyMode::Disabled);
     assert_eq!(profile.agent.state, cloister::profile::AgentState::Isolated);
     assert!(profile.host.exec.enabled);
     assert_eq!(
@@ -40,18 +43,18 @@ fn parses_the_user_facing_profile_example() {
 }
 
 #[test]
-fn rejects_profile_v4_before_inspecting_its_fields() {
-    let error = parse_profile(UNSUPPORTED_SCHEMA).expect_err("Profile V4 should be rejected");
+fn rejects_profile_v5_before_inspecting_its_fields() {
+    let error = parse_profile(UNSUPPORTED_SCHEMA).expect_err("Profile V5 should be rejected");
     let rendered = error.to_string();
 
     assert_eq!(error.message(), "schema_version is not supported");
     assert!(error.span().is_some());
-    assert!(rendered.contains("found 4; expected 5"));
+    assert!(rendered.contains("found 5; expected 6"));
     assert!(!rendered.contains("unknown field"));
 }
 
 #[test]
-fn rejects_the_removed_codex_table_in_profile_v5() {
+fn rejects_the_removed_codex_table_in_profile_v6() {
     let source = DEFAULT_PROFILE.replace("[agent]", "[codex]");
 
     let error = parse_profile(&source).expect_err("the removed Codex table should fail");
@@ -112,15 +115,22 @@ fn requires_an_explicit_agent_policy() {
 }
 
 #[test]
-fn rejects_the_removed_proxy_setting() {
-    let source = DEFAULT_PROFILE.replace(
-        "mode = \"default\"",
-        "mode = \"default\"\nproxy = \"http://host.container.internal:7890\"",
-    );
+fn requires_an_explicit_proxy_policy() {
+    let source = DEFAULT_PROFILE.replace("proxy = \"disabled\"\n", "");
 
-    let error = parse_profile(&source).expect_err("proxy setting should no longer be accepted");
+    let error = parse_profile(&source).expect_err("proxy policy should be required");
 
-    assert!(error.message().contains("unknown field"));
+    assert!(error.message().contains("missing field"));
+    assert!(error.span().is_some());
+}
+
+#[test]
+fn rejects_an_unknown_proxy_policy() {
+    let source = DEFAULT_PROFILE.replace("proxy = \"disabled\"", "proxy = \"automatic\"");
+
+    let error = parse_profile(&source).expect_err("unknown proxy policy should fail closed");
+
+    assert!(error.message().contains("unknown variant"));
     assert!(error.span().is_some());
 }
 

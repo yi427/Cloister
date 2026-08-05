@@ -1,5 +1,5 @@
-# Profile V5 example for Cloister agent commands.
-schema_version = 5
+# Profile V6 example for Cloister agent commands.
+schema_version = 6
 name = "default"
 
 [image]
@@ -15,6 +15,7 @@ timezone = "America/New_York"
 
 [network]
 mode = "default"
+proxy = "disabled"
 
 [agent]
 state = "shared"

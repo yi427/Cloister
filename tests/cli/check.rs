@@ -41,6 +41,7 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("[PASS] Profile: 'default'"));
+    assert!(stdout.contains("[PASS] Guest proxy: disabled by Profile"));
     assert!(
         stdout
             .contains("[PASS] Host policy: enabled, environment inherit-all, 0 allowed command(s)")
@@ -100,7 +101,44 @@ fn continues_with_independent_checks_when_the_profile_is_missing() {
     assert!(stdout.contains("[PASS] Runtime:"));
     assert!(stdout.contains("[SKIP] Image: Profile is unavailable"));
     assert!(stdout.contains("[PASS] DNS:"));
-    assert!(stdout.ends_with("1 check(s) failed; 2 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 3 skipped.\n"));
+}
+
+#[test]
+fn reports_an_inherited_proxy_without_exposing_its_value() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let profile = home.join("proxy.toml");
+    let secret = "secret-proxy-password";
+    fs::create_dir_all(&project).expect("project should be created");
+    write_profile(&profile, None);
+    let source = fs::read_to_string(&profile)
+        .expect("Profile should be readable")
+        .replace("proxy = \"disabled\"", "proxy = \"inherit\"");
+    fs::write(&profile, source).expect("proxy Profile should be written");
+    write_runtime(&bin, HEALTHY_RUNTIME);
+
+    let proxy_value = format!("http://user:{secret}@127.0.0.1:3080");
+    let output = run_with_environment(
+        &home,
+        &project,
+        Some(&bin),
+        &[
+            "check",
+            "--profile",
+            profile.to_str().expect("profile path should be UTF-8"),
+        ],
+        &[("HTTPS_PROXY", &proxy_value)],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains(
+        "[PASS] Guest proxy: inherit from HTTPS_PROXY (loopback mapped to host.container.internal; value redacted)"
+    ));
+    assert!(!stdout.contains(secret));
 }
 
 #[test]
@@ -271,6 +309,16 @@ fn write_executable(path: &Path) {
 }
 
 fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[&str]) -> Output {
+    run_with_environment(home, current_directory, path, arguments, &[])
+}
+
+fn run_with_environment(
+    home: &Path,
+    current_directory: &Path,
+    path: Option<&Path>,
+    arguments: &[&str],
+    environment: &[(&str, &str)],
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_cloister"));
     command
         .args(arguments)
@@ -278,8 +326,23 @@ fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_DATA_HOME");
+    for name in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        command.env_remove(name);
+    }
     if let Some(path) = path {
         command.env("PATH", path);
+    }
+    for (name, value) in environment {
+        command.env(name, value);
     }
     command.output().expect("Cloister binary should start")
 }

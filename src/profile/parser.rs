@@ -13,7 +13,7 @@ struct ProfileHeader {
     schema_version: toml::Spanned<u32>,
 }
 
-/// Parses a TOML document into the Profile V5 data model.
+/// Parses a TOML document into the Profile V6 data model.
 ///
 /// This function checks TOML syntax and the shape of the strongly typed model.
 /// Environment-dependent and security-policy checks belong to validation.

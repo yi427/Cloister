@@ -12,6 +12,15 @@ pub(crate) mod message {
     pub const WORKSPACE_PATH_RESOLUTION_FAILED: &str = "failed to resolve workspace path";
     pub const WORKSPACE_PATH_NOT_DIRECTORY: &str = "workspace path is not a directory";
     pub const WORKSPACE_PATH_IS_ROOT: &str = "workspace must not be the filesystem root";
+    pub const GUEST_PROXY_MISSING: &str =
+        "Profile requires host proxy inheritance, but no supported proxy variable is set";
+    pub const GUEST_PROXY_NON_UNICODE: &str = "host proxy environment value is not valid UTF-8";
+    pub const GUEST_PROXY_INVALID_URL: &str = "host proxy environment value is not a valid URL";
+    pub const GUEST_PROXY_UNSUPPORTED_SCHEME: &str =
+        "host proxy URL must use the http or https scheme";
+    pub const GUEST_PROXY_MISSING_HOST: &str = "host proxy URL must contain a host";
+    pub const GUEST_PROXY_REWRITE_FAILED: &str =
+        "failed to map the host proxy loopback address into the guest";
 
     pub const UNSUPPORTED_SCHEMA_VERSION: &str = "schema_version is not supported";
     pub const VALUE_MUST_NOT_BE_BLANK: &str = "must not be blank";

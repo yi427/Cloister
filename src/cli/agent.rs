@@ -20,11 +20,12 @@ use crate::{
     agent::AgentAdapter,
     error::message,
     host_bridge::{
-        BridgeToken, BridgeTokenError, HostBridgeServerError, HostExecPolicy,
+        BridgeToken, BridgeTokenError, HostBridgeServerError, HostEnvironment, HostExecPolicy,
         HostExecPolicyBuildError, serve as serve_host_bridge,
     },
     preflight::{
-        HostExecutableCheckError, PreflightError, inspect_host_executable, resolve_launch,
+        GuestProxyResolutionError, HostExecutableCheckError, PreflightError,
+        inspect_host_executable, resolve_guest_proxy, resolve_launch,
     },
     profile::{AgentState, LoadProfileError, Profile},
     runtime::{
@@ -37,7 +38,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct AgentArgs {
-    /// Path to a Profile V5 TOML file.
+    /// Path to a Profile V6 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -76,6 +77,9 @@ pub(super) async fn execute_agent(
         None => env::current_dir().map_err(AgentCommandError::CurrentDirectory)?,
     };
     let resolved = resolve_launch(profile, workspace)?;
+    let host_environment = env::vars_os().collect::<HostEnvironment>();
+    let guest_proxy =
+        resolve_guest_proxy(resolved.profile().network.proxy, host_environment.clone())?;
     let host_bridge_enabled = !arguments.no_host_bridge && resolved.profile().host.exec.enabled;
     if host_bridge_enabled {
         validate_host_executables(resolved.profile())?;
@@ -94,6 +98,7 @@ pub(super) async fn execute_agent(
             agent,
             shared_state.as_deref(),
             host_bridge,
+            guest_proxy.as_ref(),
             &arguments.arguments,
         )?;
         print!("{plan}");
@@ -103,9 +108,8 @@ pub(super) async fn execute_agent(
     let host_bridge = if !host_bridge_enabled {
         None
     } else {
-        let policy =
-            HostExecPolicy::from_profile(&resolved.profile().host.exec, env::vars_os().collect())?
-                .expect("enabled Profile policy should produce a Host Exec policy");
+        let policy = HostExecPolicy::from_profile(&resolved.profile().host.exec, host_environment)?
+            .expect("enabled Profile policy should produce a Host Exec policy");
         Some(
             RunningHostBridge::start(
                 arguments.host_bridge_port,
@@ -121,6 +125,7 @@ pub(super) async fn execute_agent(
         agent,
         shared_state.as_deref(),
         bridge_launch,
+        guest_proxy.as_ref(),
         &arguments.arguments,
     ) {
         Ok(plan) => plan,
@@ -308,6 +313,7 @@ pub(super) enum AgentCommandError {
     BridgePolicy(HostExecPolicyBuildError),
     CurrentDirectory(io::Error),
     Execution(RuntimeExecutionError),
+    GuestProxy(GuestProxyResolutionError),
     HomeDirectoryMissing,
     HostExecutable {
         command: String,
@@ -367,6 +373,7 @@ impl fmt::Display for AgentCommandError {
                 write!(formatter, "{}: {source}", message::CURRENT_DIRECTORY_FAILED)
             }
             Self::Execution(error) => error.fmt(formatter),
+            Self::GuestProxy(error) => error.fmt(formatter),
             Self::HomeDirectoryMissing => formatter.write_str(message::HOME_DIRECTORY_MISSING),
             Self::HostExecutable { command, source } => write!(
                 formatter,
@@ -395,6 +402,7 @@ impl Error for AgentCommandError {
             Self::BridgePolicy(error) => Some(error),
             Self::CurrentDirectory(source) => Some(source),
             Self::Execution(error) => Some(error),
+            Self::GuestProxy(error) => Some(error),
             Self::HomeDirectoryMissing => None,
             Self::HostExecutable { source, .. } => Some(source),
             Self::Load(error) => Some(error),
@@ -419,6 +427,12 @@ impl From<RuntimePlanError> for AgentCommandError {
 impl From<RuntimeExecutionError> for AgentCommandError {
     fn from(error: RuntimeExecutionError) -> Self {
         Self::Execution(error)
+    }
+}
+
+impl From<GuestProxyResolutionError> for AgentCommandError {
+    fn from(error: GuestProxyResolutionError) -> Self {
+        Self::GuestProxy(error)
     }
 }
 

@@ -4,6 +4,9 @@
 - Date: 2026-08-05
 - Supersedes: ADR 0002
 
+Profile V6 later adds the independent guest proxy policy defined in ADR 0005
+while retaining this Profile V5 Host Exec contract unchanged.
+
 ## Context
 
 ADR 0002 deliberately shipped the smallest useful bridge: an authenticated
@@ -165,9 +168,11 @@ configured symbolic-link or toolchain shim, and require its resolved target to
 be a regular executable file. The runtime plan and audit event should preserve
 both declared and resolved paths when they differ.
 
-Profile V4 is rejected after V5 is introduced. Cloister is still in development
-and will not add a compatibility alias or silent migration layer. `init` writes
-the new contract and continues to refuse overwriting an existing Profile.
+Profile V4 was rejected when V5 was introduced. Profile V6 now retains this
+Host Exec contract and rejects V5 because it adds the required guest proxy
+policy from ADR 0005. Cloister is still in development and will not add a
+compatibility alias or silent migration layer. `init` writes the current
+contract and continues to refuse overwriting an existing Profile.
 
 ## Environment construction
 
@@ -439,7 +444,7 @@ allowed interpreter or build tool may still be high privilege.
 
 ## CLI behavior
 
-`init` creates an enabled Profile V5 policy with `inherit-all` environment mode
+`init` creates an enabled current-Profile policy with `inherit-all` environment mode
 and continues to refuse overwriting an existing target. Its allowlist remains
 empty when the user accepts the default. The user may explicitly enter a
 comma-separated list of bare command names; only those names are resolved from
@@ -452,7 +457,7 @@ description are generated explicitly for every selected entry.
 
 `check` remains read-only and adds checks for:
 
-- Profile V5 host policy validity;
+- current Profile Host Exec policy validity;
 - declared executable existence, canonical symlink resolution, regular-file
   type, and execute permission bits;
 - the audit directory's safe ownership and permissions when it exists; and
@@ -479,7 +484,7 @@ macOS user's permissions. It must not imply host containment.
 
 Implementation is not complete until focused tests cover:
 
-- Profile V5 parsing, validation, unknown fields, and Profile V4 rejection;
+- current Profile parsing, validation, unknown fields, and prior-version rejection;
 - duplicate command names and relative executable paths;
 - allowed and denied command lookup;
 - literal argv handling proving that shell syntax is not evaluated;
@@ -501,7 +506,7 @@ repository checks.
 
 ## Deferred and open decisions
 
-Profile V5 does not attempt argument-pattern rules, configurable environment
+The current Profile does not attempt argument-pattern rules, configurable environment
 filtering, per-project policy, host-level CPU or memory containment, network
 restrictions, persistent jobs, interactive stdin, PTY programs, or
 Profile-governed execution limits.

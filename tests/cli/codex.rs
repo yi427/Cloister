@@ -20,6 +20,16 @@ fn write_default_profile(home: &Path) {
 }
 
 fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[&str]) -> Output {
+    run_with_environment(home, current_directory, path, arguments, &[])
+}
+
+fn run_with_environment(
+    home: &Path,
+    current_directory: &Path,
+    path: Option<&Path>,
+    arguments: &[&str],
+    environment: &[(&str, &str)],
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_cloister"));
     command
         .args(arguments)
@@ -27,8 +37,23 @@ fn run(home: &Path, current_directory: &Path, path: Option<&Path>, arguments: &[
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_DATA_HOME");
+    for name in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        command.env_remove(name);
+    }
     if let Some(path) = path {
         command.env("PATH", path);
+    }
+    for (name, value) in environment {
+        command.env(name, value);
     }
     command.output().expect("Cloister binary should start")
 }
@@ -47,7 +72,7 @@ fn keeps_the_shared_agent_command_help() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Path to a Profile V5 TOML file"));
+    assert!(stdout.contains("Path to a Profile V6 TOML file"));
     assert!(stdout.contains("Print the runtime plan without starting the agent"));
     assert!(stdout.contains("Arguments passed directly to the agent"));
 }
@@ -68,6 +93,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("Profile: default"));
+    assert!(stdout.contains("Guest proxy: disabled"));
     assert!(stdout.contains(&format!(
         "Workspace: {} -> /workspace (read-write)",
         canonical_project.display()
@@ -88,6 +114,67 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("default_tools_approval_mode=\\\"prompt\\\""));
     assert!(stdout.contains("\"cloister:dev\""));
     assert!(!state.exists(), "dry-run must not create agent state");
+}
+
+#[test]
+fn forwards_an_inherited_proxy_by_name_without_rendering_its_value() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let runtime = bin.join("container");
+    let profile_path = home.join("proxy-profile.toml");
+    let secret = "secret-proxy-password";
+    fs::create_dir_all(&project).expect("project should be created");
+    fs::create_dir_all(&bin).expect("bin directory should be created");
+    fs::create_dir_all(&home).expect("home should be created");
+    fs::write(
+        &runtime,
+        r#"#!/bin/sh
+test "$HTTPS_PROXY" = "http://user:secret-proxy-password@host.container.internal:3080/" || exit 71
+test "$http_proxy" = "$HTTPS_PROXY" || exit 72
+case ",$NO_PROXY," in
+  *,host.container.internal,*) ;;
+  *) exit 73 ;;
+esac
+printf '%s\n' "$@"
+"#,
+    )
+    .expect("fake container runtime should be written");
+    fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755))
+        .expect("fake runtime should be executable");
+    let profile =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml"))
+            .expect("example Profile should be readable")
+            .replace("proxy = \"disabled\"", "proxy = \"inherit\"");
+    fs::write(&profile_path, profile).expect("proxy Profile should be written");
+
+    let proxy_value = format!("http://user:{secret}@127.0.0.1:3080");
+    let output = run_with_environment(
+        &home,
+        &project,
+        Some(&bin),
+        &[
+            "codex",
+            "--profile",
+            profile_path.to_str().expect("profile path should be UTF-8"),
+            "--no-host-bridge",
+            "--",
+            "--version",
+        ],
+        &[("HTTPS_PROXY", &proxy_value)],
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert!(stdout.contains("HTTPS_PROXY"));
+    assert!(stdout.contains("NO_PROXY"));
+    assert!(!stdout.contains(secret));
 }
 
 #[test]

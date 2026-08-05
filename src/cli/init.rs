@@ -17,12 +17,15 @@ use tempfile::NamedTempFile;
 
 use crate::{
     error::message,
-    preflight::{HostExecutableCheckError, inspect_host_executable, resolve_host_command},
+    preflight::{
+        GuestProxyResolutionError, HostExecutableCheckError, detect_inherited_guest_proxy,
+        inspect_host_executable, resolve_host_command,
+    },
     profile::{
         AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, HostExecAllowProfile,
         HostExecArguments, HostExecEnvironmentMode, HostExecEnvironmentProfile, HostExecProfile,
-        HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, PROFILE_SCHEMA_VERSION,
-        Profile, validate_profile,
+        HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, NetworkProxyMode,
+        PROFILE_SCHEMA_VERSION, Profile, validate_profile,
     },
     runtime::{
         CommandSpec, HOST_BRIDGE_GUEST_NAME, dns_create_command, dns_list_command, execute,
@@ -46,7 +49,7 @@ const DEFAULT_USER: &str = "cloister";
 
 #[derive(Debug, Args)]
 pub(super) struct InitArgs {
-    /// Path where the new Profile V5 TOML file will be created.
+    /// Path where the new Profile V6 TOML file will be created.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -132,6 +135,7 @@ fn prompt_profile(
         "Persist agent credentials, settings, and session history across projects?",
         true,
     )?;
+    let network_proxy = prompt_network_proxy(input, output)?;
     let host_commands = prompt_host_commands(input, output)?;
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
@@ -149,6 +153,7 @@ fn prompt_profile(
         },
         network: NetworkProfile {
             mode: NetworkMode::Default,
+            proxy: network_proxy,
         },
         agent: AgentProfile {
             state: if persistent_state {
@@ -169,6 +174,56 @@ fn prompt_profile(
     };
     validate_profile(&profile).map_err(|source| InitCommandError::GeneratedProfile { source })?;
     Ok(profile)
+}
+
+fn prompt_network_proxy(
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<NetworkProxyMode, InitCommandError> {
+    match detect_inherited_guest_proxy(env::vars_os()) {
+        Err(source) => {
+            writeln!(
+                output,
+                "\nA host HTTP proxy variable was detected but cannot be inherited: {source}."
+            )?;
+            writeln!(output, "Its value was not printed.")?;
+            if prompt_yes_no(
+                input,
+                output,
+                "Continue with guest proxy inheritance disabled?",
+                true,
+            )? {
+                Ok(NetworkProxyMode::Disabled)
+            } else {
+                Err(source.into())
+            }
+        }
+        Ok(None) => {
+            writeln!(
+                output,
+                "\nHost HTTP proxy: not detected; guest proxy inheritance is disabled."
+            )?;
+            Ok(NetworkProxyMode::Disabled)
+        }
+        Ok(Some(proxy)) => {
+            writeln!(
+                output,
+                "\nHost HTTP proxy detected via {}. Its value will not be stored or printed.",
+                proxy.source_variable()
+            )?;
+            let inherit = prompt_yes_no(
+                input,
+                output,
+                "Inherit this proxy inside Apple containers?",
+                true,
+            )?;
+            Ok(if inherit {
+                NetworkProxyMode::Inherit
+            } else {
+                NetworkProxyMode::Disabled
+            })
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -360,7 +415,17 @@ fn print_summary(
         profile.guest.cpus.get(),
         profile.guest.memory
     )?;
-    writeln!(output, "  Network: default (outbound internet enabled)")?;
+    writeln!(
+        output,
+        "  Network: default (host routing applies; not an egress restriction)"
+    )?;
+    match profile.network.proxy {
+        NetworkProxyMode::Disabled => writeln!(output, "  Guest proxy: disabled")?,
+        NetworkProxyMode::Inherit => writeln!(
+            output,
+            "  Guest proxy: inherit host HTTP proxy at launch (values redacted)"
+        )?,
+    }
     match profile.agent.state {
         AgentState::Shared => writeln!(
             output,
@@ -666,6 +731,7 @@ pub(super) enum InitCommandError {
     },
     Input(io::Error),
     InputClosed,
+    GuestProxy(GuestProxyResolutionError),
     HostExecutableChanged {
         command: String,
         source: HostExecutableCheckError,
@@ -709,6 +775,9 @@ impl fmt::Display for InitCommandError {
             Self::Input(source) => write!(formatter, "interactive input failed: {source}"),
             Self::InputClosed => {
                 formatter.write_str("interactive input closed before setup completed")
+            }
+            Self::GuestProxy(source) => {
+                write!(formatter, "host proxy cannot be inherited: {source}")
             }
             Self::HostExecutableChanged { command, source } => write!(
                 formatter,
@@ -757,6 +826,7 @@ impl Error for InitCommandError {
             | Self::Input(source) => Some(source),
             Self::HostExecutableChanged { source, .. } => Some(source),
             Self::GeneratedProfile { source } => Some(source),
+            Self::GuestProxy(source) => Some(source),
             Self::Serialize { source } => Some(source),
             Self::HomeDirectoryMissing | Self::ProfileExists { .. } | Self::InputClosed => None,
         }
@@ -766,5 +836,11 @@ impl Error for InitCommandError {
 impl From<io::Error> for InitCommandError {
     fn from(source: io::Error) -> Self {
         Self::Input(source)
+    }
+}
+
+impl From<GuestProxyResolutionError> for InitCommandError {
+    fn from(source: GuestProxyResolutionError) -> Self {
+        Self::GuestProxy(source)
     }
 }

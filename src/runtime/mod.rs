@@ -12,5 +12,6 @@ pub use apple_container::{
 };
 pub use executor::{RuntimeExecutionError, execute, execute_output};
 pub use plan::{
-    AgentStateMount, CommandSpec, HostCommandPlan, NetworkExposure, RuntimePlan, WorkspaceMount,
+    AgentStateMount, CommandSpec, GuestProxyPlan, HostCommandPlan, NetworkExposure, RuntimePlan,
+    WorkspaceMount,
 };

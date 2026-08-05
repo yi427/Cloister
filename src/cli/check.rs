@@ -4,7 +4,7 @@ use std::{env, path::PathBuf, process::ExitCode};
 
 use crate::{
     error::message,
-    preflight::{inspect_host_executable, resolve_host_command},
+    preflight::{inspect_host_executable, resolve_guest_proxy, resolve_host_command},
     profile::{Architecture, Profile, load_profile},
     runtime::{
         CommandSpec, HOST_BRIDGE_GUEST_NAME, RuntimeExecutionError, dns_list_command,
@@ -18,7 +18,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct CheckArgs {
-    /// Path to a Profile V5 TOML file.
+    /// Path to a Profile V6 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -36,8 +36,14 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
 
     let profile = check_profile(profile_path, &mut report);
     match &profile {
-        Some(profile) => check_host_policy(profile, &mut report),
-        None => report.skip("Host policy", "Profile is unavailable"),
+        Some(profile) => {
+            record_result(&mut report, "Guest proxy", check_guest_proxy(profile));
+            check_host_policy(profile, &mut report);
+        }
+        None => {
+            report.skip("Guest proxy", "Profile is unavailable");
+            report.skip("Host policy", "Profile is unavailable");
+        }
     }
     let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
 
@@ -56,6 +62,25 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
     }
 
     report.finish()
+}
+
+fn check_guest_proxy(profile: &Profile) -> Result<String, String> {
+    match resolve_guest_proxy(profile.network.proxy, env::vars_os())
+        .map_err(|error| error.to_string())?
+    {
+        None => Ok("disabled by Profile".to_owned()),
+        Some(proxy) => {
+            let mapping = if proxy.loopback_rewritten() {
+                "loopback mapped to host.container.internal"
+            } else {
+                "host address preserved"
+            };
+            Ok(format!(
+                "inherit from {} ({mapping}; value redacted)",
+                proxy.source_variable()
+            ))
+        }
+    }
 }
 
 fn check_host_policy(profile: &Profile, report: &mut CheckReport) {

@@ -129,7 +129,7 @@ impl HostExecPolicy {
         })
     }
 
-    /// Builds the enabled policy represented by a validated Profile V5.
+    /// Builds the enabled policy represented by a validated current Profile.
     pub fn from_profile(
         profile: &HostExecProfile,
         environment: HostEnvironment,

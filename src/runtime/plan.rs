@@ -12,6 +12,7 @@ pub struct RuntimePlan {
     pub(super) profile_name: String,
     pub(super) agent_name: String,
     pub(super) network: NetworkExposure,
+    pub(super) proxy: GuestProxyPlan,
     pub(super) workspace: WorkspaceMount,
     pub(super) agent_state: Option<AgentStateMount>,
     pub(super) host_bridge_endpoint: Option<String>,
@@ -30,6 +31,10 @@ impl RuntimePlan {
 
     pub const fn network(&self) -> NetworkExposure {
         self.network
+    }
+
+    pub const fn proxy(&self) -> GuestProxyPlan {
+        self.proxy
     }
 
     pub fn workspace(&self) -> &WorkspaceMount {
@@ -59,6 +64,23 @@ impl fmt::Display for RuntimePlan {
         writeln!(formatter, "Runtime: Apple container")?;
         writeln!(formatter, "Root filesystem: read-only")?;
         writeln!(formatter, "Network: {}", self.network)?;
+        match self.proxy {
+            GuestProxyPlan::Disabled => writeln!(formatter, "Guest proxy: disabled")?,
+            GuestProxyPlan::Inherited {
+                source_variable,
+                loopback_rewritten,
+            } => {
+                let rewrite = if loopback_rewritten {
+                    "loopback mapped to host.container.internal"
+                } else {
+                    "host address preserved"
+                };
+                writeln!(
+                    formatter,
+                    "Guest proxy: inherit from {source_variable} ({rewrite}; value redacted)"
+                )?;
+            }
+        }
         writeln!(
             formatter,
             "Workspace: {} -> {} (read-write)",
@@ -133,6 +155,16 @@ pub struct HostCommandPlan {
     pub(super) name: String,
     pub(super) declared: PathBuf,
     pub(super) resolved: PathBuf,
+}
+
+/// Non-secret summary of guest proxy forwarding rendered in a runtime plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GuestProxyPlan {
+    Disabled,
+    Inherited {
+        source_variable: &'static str,
+        loopback_rewritten: bool,
+    },
 }
 
 impl HostCommandPlan {
@@ -249,7 +281,7 @@ impl fmt::Display for NetworkExposure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DefaultWithInternetEgress => {
-                formatter.write_str("default (outbound internet enabled)")
+                formatter.write_str("default (host routing applies; not an egress restriction)")
             }
         }
     }

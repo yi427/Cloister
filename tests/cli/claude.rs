@@ -46,7 +46,7 @@ fn exposes_the_shared_agent_command_help() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Path to a Profile V5 TOML file"));
+    assert!(stdout.contains("Path to a Profile V6 TOML file"));
     assert!(stdout.contains("Print the runtime plan without starting the agent"));
     assert!(stdout.contains("Arguments passed directly to the agent"));
 }

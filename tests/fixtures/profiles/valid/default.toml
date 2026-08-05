@@ -1,4 +1,4 @@
-schema_version = 5
+schema_version = 6
 name = "rust-default"
 
 [image]
@@ -14,6 +14,7 @@ timezone = "America/New_York"
 
 [network]
 mode = "default"
+proxy = "disabled"
 
 [agent]
 state = "isolated"
