@@ -27,6 +27,7 @@ use crate::{
         HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, NetworkProxyMode,
         PROFILE_SCHEMA_VERSION, Profile, validate_profile,
     },
+    release::image::{ImageCompatibilityError, classify_image},
     runtime::{
         CommandSpec, HOST_BRIDGE_GUEST_NAME, dns_create_command, dns_list_command, execute,
         execute_output, image_inspect_command, image_pull_command, system_start_command,
@@ -173,6 +174,7 @@ fn prompt_profile(
         },
     };
     validate_profile(&profile).map_err(|source| InitCommandError::GeneratedProfile { source })?;
+    classify_image(&profile.image.reference).map_err(InitCommandError::ImageCompatibility)?;
     Ok(profile)
 }
 
@@ -409,6 +411,21 @@ fn print_summary(
     writeln!(output, "  Path: {}", path.display())?;
     writeln!(output, "  Name: {}", profile.name)?;
     writeln!(output, "  Image: {}", profile.image.reference)?;
+    let compatibility = classify_image(&profile.image.reference)
+        .expect("the generated Profile image should already be classified");
+    if compatibility.is_warning() {
+        writeln!(
+            output,
+            "  Image compatibility warning: {}",
+            compatibility.detail(&profile.image.reference)
+        )?;
+    } else {
+        writeln!(
+            output,
+            "  Image compatibility: {}",
+            compatibility.detail(&profile.image.reference)
+        )?;
+    }
     writeln!(
         output,
         "  Guest: arm64, {} CPU(s), {} memory",
@@ -732,6 +749,7 @@ pub(super) enum InitCommandError {
     Input(io::Error),
     InputClosed,
     GuestProxy(GuestProxyResolutionError),
+    ImageCompatibility(ImageCompatibilityError),
     HostExecutableChanged {
         command: String,
         source: HostExecutableCheckError,
@@ -779,6 +797,7 @@ impl fmt::Display for InitCommandError {
             Self::GuestProxy(source) => {
                 write!(formatter, "host proxy cannot be inherited: {source}")
             }
+            Self::ImageCompatibility(source) => source.fmt(formatter),
             Self::HostExecutableChanged { command, source } => write!(
                 formatter,
                 "host command '{command}' changed during interactive setup: {source}"
@@ -827,6 +846,7 @@ impl Error for InitCommandError {
             Self::HostExecutableChanged { source, .. } => Some(source),
             Self::GeneratedProfile { source } => Some(source),
             Self::GuestProxy(source) => Some(source),
+            Self::ImageCompatibility(source) => Some(source),
             Self::Serialize { source } => Some(source),
             Self::HomeDirectoryMissing | Self::ProfileExists { .. } | Self::InputClosed => None,
         }

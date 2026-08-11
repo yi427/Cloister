@@ -107,6 +107,25 @@ fn dry_run_uses_separate_claude_state_and_transient_host_bridge_config() {
 }
 
 #[test]
+fn refuses_an_official_image_mismatch_before_starting_claude() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_default_profile(&home);
+    set_default_profile_image(&home, "ghcr.io/yi427/cloister:0.0.0");
+
+    let output = run(&home, &project, None, &["claude", "--dry-run"]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("official image version mismatch"));
+    assert!(!home.join(".local/share/cloister/agents/claude").exists());
+    assert!(!home.join(".local/state/cloister").exists());
+}
+
+#[test]
 fn can_disable_the_default_host_bridge() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
@@ -129,6 +148,13 @@ fn can_disable_the_default_host_bridge() {
     assert!(!stdout.contains("--mcp-config"));
     assert!(!stdout.contains("--add-dir"));
     assert!(!stdout.contains("Host Skill: host-exec"));
+}
+
+fn set_default_profile_image(home: &Path, reference: &str) {
+    let profile = home.join(".config/cloister/profile.toml");
+    let source = fs::read_to_string(&profile).expect("Profile should be readable");
+    fs::write(&profile, source.replace(RELEASE_IMAGE, reference))
+        .expect("Profile image should be updated");
 }
 
 #[test]

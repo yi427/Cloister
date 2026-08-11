@@ -1,6 +1,7 @@
 //! Core library for Cloister.
 
 mod error;
+pub(crate) mod release;
 
 pub mod agent;
 pub mod cli;

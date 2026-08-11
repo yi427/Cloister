@@ -97,6 +97,20 @@ CLI:   v0.1.0
 Image: ghcr.io/yi427/cloister:0.1.0
 ```
 
+Cloister refuses to start an agent when an official release image does not
+exactly match the CLI version. After upgrading the CLI, preview and apply the
+corresponding Profile update explicitly:
+
+```sh
+cloister profile upgrade --dry-run
+cloister profile upgrade
+cloister check
+```
+
+The upgrade command verifies the replacement Linux ARM64 image before asking
+to back up and atomically update the Profile. It never rewrites a Profile or
+pulls an image during `--dry-run`.
+
 ## Quick start
 
 Create the default Profile interactively:
@@ -312,6 +326,7 @@ policy and audit design.
 | `cloister codex` | Run Codex in the selected project. |
 | `cloister claude` | Run Claude Code in the selected project. |
 | `cloister profile check <PATH>` | Parse and statically validate one Profile without inspecting runtime state. |
+| `cloister profile upgrade [--profile <PATH>] [--dry-run]` | Preview or apply an older official release image update for the current CLI. |
 | `cloister host serve` | Start the authenticated Host MCP bridge manually for diagnostics. |
 | `cloister host exec` | Exercise one allowed command through a running bridge. |
 
@@ -339,6 +354,20 @@ Cloister does not publish a floating `latest` tag.
 | `sha-<commit>` | Image built from one exact commit. | No |
 | `X.Y.Z` | Exact release image paired with CLI tag `vX.Y.Z`. | No |
 | `X.Y` | Latest patch image in a minor release line. | Yes |
+
+Cloister classifies an official image before starting an agent:
+
+- `ghcr.io/yi427/cloister:X.Y.Z` must exactly match the CLI version;
+- `ghcr.io/yi427/cloister:sha-<full-commit>` is allowed for explicit,
+  immutable testing and produces a warning;
+- official moving tags such as `main`, `latest`, and `X.Y` are rejected; and
+- local or third-party images remain available for development but produce a
+  warning because Cloister cannot verify their release compatibility.
+
+`cloister check` reports this classification without changing runtime or
+Profile state. Both normal execution and `--dry-run` agent plans fail before
+workspace, bridge, or container side effects when an official release pair is
+incompatible.
 
 The Linux ARM64 image contains pinned Node.js, Rust, Codex, and Claude Code
 versions, plus Git, build tools, `ripgrep`, and `bubblewrap`. It runs as the
@@ -379,7 +408,8 @@ make image
 ```
 
 This creates `cloister:dev`. A development Profile must select that tag
-explicitly; user-facing release Profiles use exact GHCR versions.
+explicitly and Cloister reports it as an unverified custom-image warning;
+user-facing release Profiles use exact GHCR versions.
 
 Run the CLI from the checkout:
 

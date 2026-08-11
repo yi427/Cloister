@@ -29,6 +29,7 @@ use crate::{
         inspect_host_executable, resolve_guest_proxy, resolve_launch,
     },
     profile::{AgentState, LoadProfileError, Profile},
+    release::image::{ImageCompatibilityError, classify_image},
     runtime::{
         HOST_BRIDGE_GUEST_NAME, HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError, execute,
         plan_agent_container,
@@ -73,6 +74,15 @@ pub(super) async fn execute_agent(
     arguments: AgentArgs,
 ) -> Result<ExitCode, AgentCommandError> {
     let profile = load_selected_profile(arguments.profile.as_deref())?;
+    let image_reference = profile.image.reference.as_str();
+    let image_compatibility =
+        classify_image(image_reference).map_err(AgentCommandError::ImageCompatibility)?;
+    if image_compatibility.is_warning() {
+        eprintln!(
+            "cloister: warning: {}",
+            image_compatibility.detail(image_reference)
+        );
+    }
     let workspace = match arguments.workspace {
         Some(workspace) => workspace,
         None => env::current_dir().map_err(AgentCommandError::CurrentDirectory)?,
@@ -361,6 +371,7 @@ pub(super) enum AgentCommandError {
     Execution(RuntimeExecutionError),
     GuestProxy(GuestProxyResolutionError),
     HomeDirectoryMissing,
+    ImageCompatibility(ImageCompatibilityError),
     HostExecutable {
         command: String,
         source: HostExecutableCheckError,
@@ -429,6 +440,7 @@ impl fmt::Display for AgentCommandError {
             Self::Execution(error) => error.fmt(formatter),
             Self::GuestProxy(error) => error.fmt(formatter),
             Self::HomeDirectoryMissing => formatter.write_str(message::HOME_DIRECTORY_MISSING),
+            Self::ImageCompatibility(error) => error.fmt(formatter),
             Self::HostExecutable { command, source } => write!(
                 formatter,
                 "host command '{command}' is unavailable: {source}"
@@ -469,6 +481,7 @@ impl Error for AgentCommandError {
             Self::Execution(error) => Some(error),
             Self::GuestProxy(error) => Some(error),
             Self::HomeDirectoryMissing => None,
+            Self::ImageCompatibility(error) => Some(error),
             Self::HostExecutable { source, .. } => Some(source),
             Self::HostSkillConflict { .. } => None,
             Self::HostSkillConflictInspection { source, .. } => Some(source),

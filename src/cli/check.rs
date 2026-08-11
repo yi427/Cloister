@@ -7,6 +7,7 @@ use crate::{
     host_bridge::{AuditLogInspection, default_audit_log_path, inspect_audit_log_path},
     preflight::{inspect_host_executable, resolve_guest_proxy, resolve_host_command},
     profile::{Architecture, Profile, load_profile},
+    release::image::{ImageCompatibility, classify_image},
     runtime::{
         CommandSpec, HOST_BRIDGE_GUEST_NAME, RuntimeExecutionError, dns_list_command,
         execute_output, image_inspect_command, system_status_command,
@@ -45,11 +46,13 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
             } else {
                 report.skip("Host audit", "Host Exec is disabled by Profile");
             }
+            check_image_compatibility(profile, &mut report);
         }
         None => {
             report.skip("Guest proxy", "Profile is unavailable");
             report.skip("Host policy", "Profile is unavailable");
             report.skip("Host audit", "Profile is unavailable");
+            report.skip("Image compatibility", "Profile is unavailable");
         }
     }
     let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
@@ -69,6 +72,19 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
     }
 
     report.finish()
+}
+
+fn check_image_compatibility(profile: &Profile, report: &mut CheckReport) {
+    let reference = profile.image.reference.as_str();
+    match classify_image(reference) {
+        Ok(compatibility @ ImageCompatibility::PairedRelease { .. }) => {
+            report.pass("Image compatibility", compatibility.detail(reference));
+        }
+        Ok(compatibility) => {
+            report.warn("Image compatibility", compatibility.detail(reference));
+        }
+        Err(error) => report.fail("Image compatibility", error.to_string()),
+    }
 }
 
 fn check_host_audit() -> Result<String, String> {
@@ -185,11 +201,17 @@ async fn check_runtime() -> Result<String, String> {
 }
 
 async fn check_image(profile: &Profile) -> Result<String, String> {
-    let reference = profile.image.reference.as_str();
+    inspect_image(&profile.image.reference, profile.image.architecture).await
+}
+
+pub(super) async fn inspect_image(
+    reference: &str,
+    architecture: Architecture,
+) -> Result<String, String> {
     let command = image_inspect_command(reference);
     let output = command_output(&command).await?;
     let images: Vec<ImageInspection> = parse_json(&output, &command)?;
-    let architecture = architecture_name(profile.image.architecture);
+    let architecture = architecture_name(architecture);
     let has_compatible_variant = images.iter().any(|image| {
         image.variants.iter().any(|variant| {
             variant.platform.os == "linux" && variant.platform.architecture == architecture
@@ -315,6 +337,7 @@ struct ImagePlatform {
 enum CheckOutcome {
     Pass,
     Fail,
+    Warn,
     Skip,
 }
 
@@ -337,6 +360,10 @@ impl CheckReport {
 
     fn fail(&mut self, name: &'static str, detail: impl Into<String>) {
         self.push(name, detail, CheckOutcome::Fail);
+    }
+
+    fn warn(&mut self, name: &'static str, detail: impl Into<String>) {
+        self.push(name, detail, CheckOutcome::Warn);
     }
 
     fn skip(&mut self, name: &'static str, detail: impl Into<String>) {
@@ -362,22 +389,34 @@ impl CheckReport {
             .iter()
             .filter(|result| matches!(result.outcome, CheckOutcome::Skip))
             .count();
+        let warned = self
+            .results
+            .iter()
+            .filter(|result| matches!(result.outcome, CheckOutcome::Warn))
+            .count();
 
         for result in self.results {
             let status = match result.outcome {
                 CheckOutcome::Pass => "PASS",
                 CheckOutcome::Fail => "FAIL",
+                CheckOutcome::Warn => "WARN",
                 CheckOutcome::Skip => "SKIP",
             };
             print_result(status, result.name, &result.detail);
         }
         println!();
 
-        if failed == 0 {
+        if failed == 0 && warned == 0 {
             println!("All checks passed.");
             ExitCode::SUCCESS
-        } else {
+        } else if failed == 0 {
+            println!("All required checks passed; {warned} warning(s).");
+            ExitCode::SUCCESS
+        } else if warned == 0 {
             println!("{failed} check(s) failed; {skipped} skipped.");
+            ExitCode::FAILURE
+        } else {
+            println!("{failed} check(s) failed; {warned} warning(s); {skipped} skipped.");
             ExitCode::FAILURE
         }
     }
