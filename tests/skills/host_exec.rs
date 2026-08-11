@@ -39,6 +39,26 @@ fn requires_discovery_literal_arguments_and_fail_closed_behavior() {
 }
 
 #[test]
+fn keeps_shared_workspace_file_operations_inside_the_guest() {
+    for requirement in [
+        "Do not use for reading, writing, listing, or patching files",
+        "Use Guest file tools",
+        "live read-write mount",
+        "Do not use `host.exec` merely to move workspace content",
+        "do not Base64-encode a workspace file",
+        "`python -c`",
+        "prefer paths relative to its",
+        "outside `/workspace`",
+        "Do not treat an allowed interpreter as a Host file API",
+    ] {
+        assert!(
+            SKILL.contains(requirement),
+            "missing workspace boundary: {requirement}"
+        );
+    }
+}
+
+#[test]
 fn declares_the_canonical_skill_and_mcp_dependency() {
     assert!(OPENAI_METADATA.contains("display_name: \"Cloister Host Exec\""));
     assert!(OPENAI_METADATA.contains("$host-exec"));
