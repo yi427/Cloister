@@ -71,11 +71,15 @@ impl HostBridgeService {
 impl HostBridgeService {
     #[tool(
         name = "host.list_commands",
-        description = "List the host commands allowed by the immutable Cloister Profile policy",
+        description = "List the fixed Host working directory and commands allowed by the immutable Cloister Profile policy",
         annotations(read_only_hint = true)
     )]
     async fn host_list_commands(&self) -> Json<super::HostListCommandsOutput> {
-        Json(tools::host_list_commands(&self.policy, true))
+        Json(tools::host_list_commands(
+            &self.policy,
+            self.working_directory.as_path(),
+            true,
+        ))
     }
 
     #[tool(
@@ -129,7 +133,7 @@ impl HostBridgeService {
 impl ServerHandler for HostBridgeService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Call host.list_commands before host.exec. host.exec starts only Profile-allowed executables and returns an execution ID. Poll host.exec_status with its cursor while the state is running, and call host.exec_cancel when a running execution is no longer needed. Arguments are passed literally without a shell, and host processes still use the permissions of the macOS user running this bridge.",
+            "Call host.list_commands before host.exec. It reports the fixed Host working directory and immutable Profile-allowed commands; prefer workspace-relative paths. host.exec starts only an allowed executable and returns an execution ID. Poll host.exec_status with its cursor while the state is running, and call host.exec_cancel when a running execution is no longer needed. Arguments are passed literally without a shell, and host processes still use the permissions of the macOS user running this bridge.",
         )
     }
 }

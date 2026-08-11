@@ -59,7 +59,7 @@ Profile and authorization design.
 
 ### Expose the fixed Host working directory through discovery
 
-`host.list_commands` will add the canonical fixed Host working directory to its
+`host.list_commands` adds the canonical fixed Host working directory to its
 read-only output. This makes relative Host command paths inspectable without
 requiring a preliminary `pwd` command.
 
@@ -129,13 +129,19 @@ rollback decision.
 
 ## Validation
 
-The workspace-routing portion is implemented and verified:
+The workspace-routing and working-directory discovery portions are implemented
+and verified:
 
 - the Skill frontmatter excludes shared workspace file operations;
 - the Skill body describes the Guest/Host choice and rejects Base64 plus
   interpreter file transfer;
 - a focused contract test preserves those instructions;
+- discovery returns the same canonical Host working directory used by
+  `host.exec`;
 - the Skill validator and repository verification pass;
+- a real Claude session discovered `/Volumes/Home/project/Cloister` and a
+  Profile-allowed Host Python reported the same value from `os.getcwd()`,
+  without an extra `pwd`, a custom working directory, or file changes;
 - a real Claude session used Guest file tools successfully, with changes
   appearing immediately in the Host workspace; and
 - the same session discovered the Profile-allowed Host Python and invoked it
@@ -144,10 +150,9 @@ The workspace-routing portion is implemented and verified:
 
 Before this ADR is fully implemented:
 
-- add focused discovery tests for the canonical Host working directory;
 - add status-wait tests for new output, terminal completion, expiration, the
   service-side cap, unknown execution IDs, and cursor behavior;
 - update the canonical Skill, README, and ADR 0004 references for the connected
-  tool schema; and
-- run `make verify` plus real Codex and Claude Host Exec acceptance through
-  Apple `container`.
+  status-wait schema; and
+- run `make verify` plus real Codex and Claude acceptance for bounded status
+  waiting through Apple `container`.

@@ -235,7 +235,7 @@ The server exposes four tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `host.list_commands` | Discover the immutable Profile allowlist and non-secret environment metadata. |
+| `host.list_commands` | Discover the fixed Host working directory, immutable Profile allowlist, and non-secret environment metadata. |
 | `host.exec` | Start one allowed executable with a literal argument vector. |
 | `host.exec_status` | Read state and incremental output using a cursor. |
 | `host.exec_cancel` | Cancel an execution and its process group. |

@@ -13,6 +13,7 @@ fn describes_only_the_connected_host_tool_surface() {
     assert!(SKILL.starts_with("---\nname: host-exec\ndescription:"));
     assert!(SKILL.contains("`cloister_host` MCP tools"));
     assert!(SKILL.contains("Call `host.list_commands`"));
+    assert!(SKILL.contains("fixed Host working directory"));
     assert!(SKILL.contains("Call `host.exec`"));
     assert!(SKILL.contains("call `host.exec_status`"));
     assert!(SKILL.contains("call `host.exec_cancel`"));

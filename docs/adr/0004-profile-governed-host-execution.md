@@ -234,6 +234,7 @@ remain fail-closed.
 This read-only tool accepts no policy input. It returns:
 
 - DSL version;
+- the canonical fixed Host working directory selected for this bridge;
 - allowed command names and descriptions;
 - the argument policy for each command;
 - environment mode and variable names, never values;

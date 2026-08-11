@@ -27,10 +27,11 @@ Profile returned by the bridge as the authority for the entire bridge session.
 1. Call `host.list_commands` before the first host operation in a bridge
    session. Call it again after a reconnect or when the bridge reports that the
    session changed.
-2. Read the returned DSL `version`, command names, descriptions, argument
-   policies, environment mode, environment variable names, and audit status.
-   Never infer an executable from `PATH` or from a command that is absent from
-   this response.
+2. Read the returned DSL `version`, fixed Host working directory, command names,
+   descriptions, argument policies, environment mode, environment variable
+   names, and audit status. Prefer workspace-relative paths when calling a Host
+   command. Never infer an executable from `PATH` or from a command that is
+   absent from this response.
 3. Select only a returned command name. If the requested command is absent,
    report that it is unavailable. Do not substitute another command,
    interpreter, build tool, or execution mechanism to bypass the policy.

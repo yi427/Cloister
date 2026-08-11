@@ -291,8 +291,11 @@ async fn discovers_only_profile_allowed_commands_without_environment_values() {
         .await
         .expect("host.list_commands should return policy metadata");
     let rendered = serde_json::to_string(&output).expect("discovery should serialize");
+    let canonical_working_directory =
+        fs::canonicalize(directory.path()).expect("working directory should canonicalize");
 
     assert_eq!(output.version, HOST_EXEC_DSL_VERSION);
+    assert_eq!(output.working_directory, canonical_working_directory);
     assert_eq!(output.commands.len(), 1);
     assert_eq!(output.commands[0].name, "allowed-tool");
     assert_eq!(output.commands[0].arguments, "any");
