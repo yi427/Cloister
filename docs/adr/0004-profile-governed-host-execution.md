@@ -234,6 +234,7 @@ remain fail-closed.
 This read-only tool accepts no policy input. It returns:
 
 - DSL version;
+- the canonical fixed Host working directory selected for this bridge;
 - allowed command names and descriptions;
 - the argument policy for each command;
 - environment mode and variable names, never values;
@@ -273,14 +274,23 @@ execution timeout.
 
 ### `host.exec_status`
 
-This read-only tool accepts an `execution_id` and an optional output cursor:
+This read-only tool accepts an `execution_id`, an optional output cursor, and an
+optional bounded wait:
 
 ```json
 {
   "execution_id": "exec_7k2...",
-  "cursor": 0
+  "cursor": 0,
+  "wait_ms": 10000
 }
 ```
+
+A positive `wait_ms` waits until retained output is available after the cursor,
+the execution becomes terminal, or the interval expires. Omission or `0`
+returns an immediate snapshot. The bridge caps the effective wait at 30 seconds
+and permits at most 32 concurrent blocking status waits. A request above that
+capacity returns a typed error; immediate status reads and `host.exec_cancel`
+do not consume this capacity.
 
 It returns the current state and only output chunks after that cursor:
 
@@ -313,8 +323,11 @@ Terminal states are `completed`, `failed`, and `cancelled`. A completed process
 reports its exit code when the platform provides one. Evicted or unknown
 execution IDs return a typed error rather than being treated as still running.
 
-Status reads should not require another execution approval. The Skill should
-poll with bounded backoff instead of issuing tight repeated requests.
+Status reads should not require another execution approval. Expiration returns
+the current snapshot without cancelling the process, and disconnecting a
+status client does not cancel it. The Skill should keep one status wait in
+flight with a recommended 10-second wait, then repeat only while the execution
+remains `running`.
 
 ### `host.exec_cancel`
 
@@ -375,14 +388,15 @@ for hours. Therefore:
 - there is no global default execution timeout;
 - the MCP request lifetime is kept short by returning an execution ID.
 
-The execution manager permits at most eight concurrent processes, retains at
-most 1 MiB of output per execution, and retains at most 128 execution records.
-It evicts the oldest terminal records as needed. Reaching the output limit marks
-the status as truncated but does not stop the process. The cancellation grace
-period is two seconds, followed by a forceful process-group kill and a bounded
-one-second cleanup wait. Bridge shutdown allows four seconds total for all
-registered executions to reach a terminal state. Profile-governed concurrency,
-output, and maximum runtime limits are deferred to a later schema.
+The execution manager permits at most eight concurrent processes and 32
+concurrent blocking status waits, retains at most 1 MiB of output per execution,
+and retains at most 128 execution records. It evicts the oldest terminal records
+as needed. Reaching the output limit marks the status as truncated but does not
+stop the process. The cancellation grace period is two seconds, followed by a
+forceful process-group kill and a bounded one-second cleanup wait. Bridge
+shutdown allows four seconds total for all registered executions to reach a
+terminal state. Profile-governed concurrency, output, and maximum runtime
+limits are deferred to a later schema.
 
 These controls prevent accidental bridge resource exhaustion. They do not
 limit CPU, memory, filesystem, or network activity performed by an allowed host
@@ -449,7 +463,7 @@ short and procedural:
 2. select only a command returned by that tool;
 3. submit a structured request without shell syntax or environment injection;
 4. accept either an inline final result or a running execution ID;
-5. poll `host.exec_status` with bounded backoff for long operations;
+5. wait on `host.exec_status` with the latest cursor for long operations;
 6. call `host.exec_cancel` when the operation is no longer wanted; and
 7. report denied policy rather than trying to bypass it with another command.
 

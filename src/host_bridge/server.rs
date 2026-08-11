@@ -71,11 +71,15 @@ impl HostBridgeService {
 impl HostBridgeService {
     #[tool(
         name = "host.list_commands",
-        description = "List the host commands allowed by the immutable Cloister Profile policy",
+        description = "List the fixed Host working directory and commands allowed by the immutable Cloister Profile policy",
         annotations(read_only_hint = true)
     )]
     async fn host_list_commands(&self) -> Json<super::HostListCommandsOutput> {
-        Json(tools::host_list_commands(&self.policy, true))
+        Json(tools::host_list_commands(
+            &self.policy,
+            self.working_directory.as_path(),
+            true,
+        ))
     }
 
     #[tool(
@@ -99,7 +103,7 @@ impl HostBridgeService {
 
     #[tool(
         name = "host.exec_status",
-        description = "Read the current state and incremental retained output of a Host Exec execution",
+        description = "Read Host Exec state and incremental retained output, optionally waiting for new output or a terminal state",
         annotations(read_only_hint = true)
     )]
     async fn host_exec_status(
@@ -107,6 +111,7 @@ impl HostBridgeService {
         Parameters(input): Parameters<super::HostExecStatusRequest>,
     ) -> Result<Json<super::HostExecStatusOutput>, String> {
         tools::host_exec_status(&self.executions, &input)
+            .await
             .map(Json)
             .map_err(|error| error.to_string())
     }
@@ -129,7 +134,7 @@ impl HostBridgeService {
 impl ServerHandler for HostBridgeService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Call host.list_commands before host.exec. host.exec starts only Profile-allowed executables and returns an execution ID. Poll host.exec_status with its cursor while the state is running, and call host.exec_cancel when a running execution is no longer needed. Arguments are passed literally without a shell, and host processes still use the permissions of the macOS user running this bridge.",
+            "Call host.list_commands before host.exec. It reports the fixed Host working directory and immutable Profile-allowed commands; prefer workspace-relative paths. host.exec starts only an allowed executable and returns an execution ID. While it is running, call host.exec_status with its cursor and a bounded wait for new output or completion. Call host.exec_cancel when a running execution is no longer needed. Arguments are passed literally without a shell, and host processes still use the permissions of the macOS user running this bridge.",
         )
     }
 }
@@ -370,6 +375,23 @@ mod tests {
                 .as_ref()
                 .and_then(|metadata| metadata.0.get(REQUIRES_USER_INTERACTION)),
             Some(&serde_json::Value::Bool(true))
+        );
+        let host_exec_status = tools
+            .iter()
+            .find(|tool| tool.name == "host.exec_status")
+            .expect("host.exec_status should be present");
+        let status_properties = host_exec_status
+            .input_schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("host.exec_status should expose object properties");
+        assert!(status_properties.contains_key("wait_ms"));
+        assert!(
+            host_exec_status
+                .input_schema
+                .get("required")
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(|required| required.iter().all(|name| name != "wait_ms"))
         );
         for tool in tools
             .iter()

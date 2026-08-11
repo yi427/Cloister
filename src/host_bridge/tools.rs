@@ -1,6 +1,9 @@
 //! Profile-governed tools exposed through the Host MCP bridge.
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,6 +20,7 @@ use super::{
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct HostListCommandsOutput {
     pub version: u32,
+    pub working_directory: PathBuf,
     pub commands: Vec<HostCommandInfo>,
     pub environment: HostEnvironmentInfo,
     pub audit_logging: bool,
@@ -39,10 +43,12 @@ pub struct HostEnvironmentInfo {
 
 pub(super) fn host_list_commands(
     policy: &HostExecPolicy,
+    working_directory: &Path,
     audit_logging: bool,
 ) -> HostListCommandsOutput {
     HostListCommandsOutput {
         version: HOST_EXEC_DSL_VERSION,
+        working_directory: working_directory.to_owned(),
         commands: policy
             .commands()
             .map(|command| HostCommandInfo {
@@ -73,11 +79,11 @@ pub(super) async fn host_exec(
     executions.start(policy, request, working_directory).await
 }
 
-pub(super) fn host_exec_status(
+pub(super) async fn host_exec_status(
     executions: &ExecutionManager,
     request: &HostExecStatusRequest,
 ) -> Result<HostExecStatusOutput, ExecutionError> {
-    executions.status(request)
+    executions.status(request).await
 }
 
 pub(super) fn host_exec_cancel(
@@ -152,7 +158,9 @@ mod tests {
                     .status(&crate::host_bridge::HostExecStatusRequest {
                         execution_id: output.execution_id.clone(),
                         cursor: None,
+                        wait_ms: Some(1_000),
                     })
+                    .await
                     .expect("execution status should exist");
             }
         })
@@ -191,10 +199,12 @@ mod tests {
         .expect("test policy should build")
         .expect("test policy should be enabled");
 
-        let output = host_list_commands(&policy, true);
+        let working_directory = std::path::Path::new("/host/workspace");
+        let output = host_list_commands(&policy, working_directory, true);
         let rendered = serde_json::to_string(&output).expect("discovery should serialize");
 
         assert_eq!(output.version, HOST_EXEC_DSL_VERSION);
+        assert_eq!(output.working_directory, working_directory);
         assert_eq!(output.commands[0].name, "printer");
         assert_eq!(output.commands[0].description, "Print arguments");
         assert_eq!(output.commands[0].arguments, "any");

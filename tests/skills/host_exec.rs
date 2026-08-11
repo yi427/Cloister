@@ -13,10 +13,13 @@ fn describes_only_the_connected_host_tool_surface() {
     assert!(SKILL.starts_with("---\nname: host-exec\ndescription:"));
     assert!(SKILL.contains("`cloister_host` MCP tools"));
     assert!(SKILL.contains("Call `host.list_commands`"));
+    assert!(SKILL.contains("fixed Host working directory"));
     assert!(SKILL.contains("Call `host.exec`"));
     assert!(SKILL.contains("call `host.exec_status`"));
     assert!(SKILL.contains("call `host.exec_cancel`"));
-    assert!(SKILL.contains("start near 250 ms and cap at 1 second"));
+    assert!(SKILL.contains("`wait_ms: 10000`"));
+    assert!(SKILL.contains("status wait in flight"));
+    assert!(SKILL.contains("bounded wait"));
 }
 
 #[test]
@@ -34,6 +37,26 @@ fn requires_discovery_literal_arguments_and_fail_closed_behavior() {
         assert!(
             SKILL.contains(requirement),
             "missing semantic: {requirement}"
+        );
+    }
+}
+
+#[test]
+fn keeps_shared_workspace_file_operations_inside_the_guest() {
+    for requirement in [
+        "Do not use for reading, writing, listing, or patching files",
+        "Use Guest file tools",
+        "live read-write mount",
+        "Do not use `host.exec` merely to move workspace content",
+        "do not Base64-encode a workspace file",
+        "`python -c`",
+        "prefer paths relative to its",
+        "outside `/workspace`",
+        "Do not treat an allowed interpreter as a Host file API",
+    ] {
+        assert!(
+            SKILL.contains(requirement),
+            "missing workspace boundary: {requirement}"
         );
     }
 }

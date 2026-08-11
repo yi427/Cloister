@@ -6,7 +6,7 @@ use std::{
     net::TcpStream,
     os::unix::fs::PermissionsExt,
     path::Path,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use cloister::{
@@ -118,13 +118,13 @@ async fn wait_for_terminal(
             output.chunks = chunks;
             return output;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
         output = call_host_exec_status(
             endpoint,
             token,
             &HostExecStatusRequest {
                 execution_id: output.execution_id.clone(),
                 cursor: Some(cursor),
+                wait_ms: Some(1_000),
             },
         )
         .await
@@ -291,8 +291,11 @@ async fn discovers_only_profile_allowed_commands_without_environment_values() {
         .await
         .expect("host.list_commands should return policy metadata");
     let rendered = serde_json::to_string(&output).expect("discovery should serialize");
+    let canonical_working_directory =
+        fs::canonicalize(directory.path()).expect("working directory should canonicalize");
 
     assert_eq!(output.version, HOST_EXEC_DSL_VERSION);
+    assert_eq!(output.working_directory, canonical_working_directory);
     assert_eq!(output.commands.len(), 1);
     assert_eq!(output.commands[0].name, "allowed-tool");
     assert_eq!(output.commands[0].arguments, "any");
@@ -368,6 +371,7 @@ async fn terminal_execution_duration_stops_advancing() {
         &HostExecStatusRequest {
             execution_id: output.execution_id,
             cursor: Some(output.next_cursor),
+            wait_ms: None,
         },
     )
     .await
@@ -375,6 +379,160 @@ async fn terminal_execution_duration_stops_advancing() {
 
     assert_eq!(later.state, HostExecutionState::Completed);
     assert_eq!(later.duration_ms, terminal_duration_ms);
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn status_wait_returns_when_new_output_arrives_after_the_cursor() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("delayed-output");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nsleep 0.25\nprintf 'ready\\n'\nsleep 1\n",
+    )
+    .expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("delayed-output", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(&endpoint, &token, &request("delayed-output", &[]))
+        .await
+        .expect("host.exec should start the command");
+    assert_eq!(output.state, HostExecutionState::Running);
+    assert!(output.chunks.is_empty());
+    let waited = call_host_exec_status(
+        &endpoint,
+        &token,
+        &HostExecStatusRequest {
+            execution_id: output.execution_id.clone(),
+            cursor: Some(output.next_cursor),
+            wait_ms: Some(5_000),
+        },
+    )
+    .await
+    .expect("status wait should return for new retained output");
+
+    assert_eq!(waited.state, HostExecutionState::Running);
+    assert_eq!(stream_text(&waited, HostOutputStream::Stdout), "ready\n");
+    assert!(waited.next_cursor > output.next_cursor);
+    let output = wait_for_terminal(&endpoint, &token, waited).await;
+    assert_eq!(output.state, HostExecutionState::Completed);
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn status_wait_returns_when_a_silent_execution_becomes_terminal() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("silent-completion");
+    fs::write(&executable, "#!/bin/sh\nsleep 0.25\n").expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("silent-completion", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(&endpoint, &token, &request("silent-completion", &[]))
+        .await
+        .expect("host.exec should start the command");
+    assert_eq!(output.state, HostExecutionState::Running);
+    let output = call_host_exec_status(
+        &endpoint,
+        &token,
+        &HostExecStatusRequest {
+            execution_id: output.execution_id,
+            cursor: Some(output.next_cursor),
+            wait_ms: Some(5_000),
+        },
+    )
+    .await
+    .expect("status wait should return for terminal completion");
+
+    assert_eq!(output.state, HostExecutionState::Completed);
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.chunks.is_empty());
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn status_wait_expiration_returns_the_current_running_snapshot() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("silent-running");
+    fs::write(&executable, "#!/bin/sh\nsleep 0.75\n").expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("silent-running", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(&endpoint, &token, &request("silent-running", &[]))
+        .await
+        .expect("host.exec should start the command");
+    assert_eq!(output.state, HostExecutionState::Running);
+    let started = Instant::now();
+    let waited = call_host_exec_status(
+        &endpoint,
+        &token,
+        &HostExecStatusRequest {
+            execution_id: output.execution_id,
+            cursor: Some(output.next_cursor),
+            wait_ms: Some(75),
+        },
+    )
+    .await
+    .expect("status wait expiration should return a snapshot");
+
+    assert!(started.elapsed() >= Duration::from_millis(50));
+    assert_eq!(waited.state, HostExecutionState::Running);
+    assert_eq!(waited.next_cursor, output.next_cursor);
+    assert!(waited.chunks.is_empty());
+    let output = wait_for_terminal(&endpoint, &token, waited).await;
+    assert_eq!(output.state, HostExecutionState::Completed);
+    stop(cancellation, handle).await;
+}
+
+#[tokio::test]
+async fn dropping_a_status_wait_does_not_cancel_the_execution() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token = create_token(&directory.path().join("bridge.token"));
+    let executable = directory.path().join("survives-status-disconnect");
+    fs::write(&executable, "#!/bin/sh\nsleep 0.4\n").expect("test executable should be written");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+        .expect("test executable should be executable");
+    let policy = profile_policy("survives-status-disconnect", &executable, BTreeMap::new());
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+
+    let output = call_host_exec(
+        &endpoint,
+        &token,
+        &request("survives-status-disconnect", &[]),
+    )
+    .await
+    .expect("host.exec should start the command");
+    assert_eq!(output.state, HostExecutionState::Running);
+    let wait_endpoint = endpoint.clone();
+    let wait_token = token.clone();
+    let wait_execution_id = output.execution_id.clone();
+    let waiter = tokio::spawn(async move {
+        call_host_exec_status(
+            &wait_endpoint,
+            &wait_token,
+            &HostExecStatusRequest {
+                execution_id: wait_execution_id,
+                cursor: Some(0),
+                wait_ms: Some(30_000),
+            },
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    waiter.abort();
+    let _ = waiter.await;
+
+    let output = wait_for_terminal(&endpoint, &token, output).await;
+    assert_eq!(output.state, HostExecutionState::Completed);
+    assert_eq!(output.exit_code, Some(0));
     stop(cancellation, handle).await;
 }
 
@@ -471,13 +629,13 @@ async fn status_returns_only_output_after_the_requested_cursor() {
         {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
         snapshot = call_host_exec_status(
             &endpoint,
             &token,
             &HostExecStatusRequest {
                 execution_id: snapshot.execution_id.clone(),
                 cursor: None,
+                wait_ms: Some(1_000),
             },
         )
         .await
@@ -499,18 +657,19 @@ async fn status_returns_only_output_after_the_requested_cursor() {
         &HostExecStatusRequest {
             execution_id: snapshot.execution_id,
             cursor: Some(cursor),
+            wait_ms: Some(1_000),
         },
     )
     .await
     .expect("host.exec_status should accept a cursor");
     while later.state == HostExecutionState::Running {
-        tokio::time::sleep(Duration::from_millis(20)).await;
         later = call_host_exec_status(
             &endpoint,
             &token,
             &HostExecStatusRequest {
                 execution_id: later.execution_id.clone(),
                 cursor: Some(cursor),
+                wait_ms: Some(1_000),
             },
         )
         .await
@@ -536,15 +695,20 @@ async fn rejects_unknown_execution_ids_for_status_and_cancel() {
     let (endpoint, cancellation, handle) =
         start(token.clone(), empty_policy(), directory.path()).await;
 
-    let status_error = call_host_exec_status(
-        &endpoint,
-        &token,
-        &HostExecStatusRequest {
-            execution_id: "exec_missing".to_owned(),
-            cursor: None,
-        },
+    let status_error = tokio::time::timeout(
+        Duration::from_millis(500),
+        call_host_exec_status(
+            &endpoint,
+            &token,
+            &HostExecStatusRequest {
+                execution_id: "exec_missing".to_owned(),
+                cursor: None,
+                wait_ms: Some(30_000),
+            },
+        ),
     )
     .await
+    .expect("unknown status execution should not wait")
     .expect_err("unknown status execution should fail");
     let cancel_error = call_host_exec_cancel(
         &endpoint,

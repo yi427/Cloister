@@ -1,6 +1,6 @@
 ---
 name: host-exec
-description: Use the authenticated Cloister Host MCP bridge to discover and run Profile-allowed commands on the macOS host from a Cloister guest. Use when a task needs an available host-native toolchain, build command, interpreter, or other executable exposed through `cloister_host`, and when reporting Host Exec approvals, denials, output, or policy is required.
+description: Use the authenticated Cloister Host MCP bridge to discover and run Profile-allowed commands on the macOS host from a Cloister guest. Use when a task needs an available host-native toolchain, build command, or other executable exposed through `cloister_host`, and when reporting Host Exec approvals, denials, output, or policy is required. Do not use for reading, writing, listing, or patching files in the shared Guest `/workspace`; use Guest file tools there.
 ---
 
 # Cloister Host Exec
@@ -8,15 +8,30 @@ description: Use the authenticated Cloister Host MCP bridge to discover and run 
 Use only the `cloister_host` MCP tools for host execution. Treat the immutable
 Profile returned by the bridge as the authority for the entire bridge session.
 
+## Choose Guest or Host
+
+- Use Guest file tools to read, write, list, and patch files under `/workspace`.
+  It is a live read-write mount of the selected Host workspace, so Guest changes
+  already appear in the corresponding Host project.
+- Do not use `host.exec` merely to move workspace content across the Guest/Host
+  boundary. In particular, do not Base64-encode a workspace file or invoke an
+  allowed interpreter such as `python -c` to recreate it on the Host.
+- Use Host Exec only when the task requires a Profile-allowed macOS executable.
+  When that executable consumes workspace files, prefer paths relative to its
+  fixed Host workspace working directory.
+- If a requested file is outside `/workspace`, report that it is outside the
+  shared workspace. Do not treat an allowed interpreter as a Host file API.
+
 ## Execute a host command
 
 1. Call `host.list_commands` before the first host operation in a bridge
    session. Call it again after a reconnect or when the bridge reports that the
    session changed.
-2. Read the returned DSL `version`, command names, descriptions, argument
-   policies, environment mode, environment variable names, and audit status.
-   Never infer an executable from `PATH` or from a command that is absent from
-   this response.
+2. Read the returned DSL `version`, fixed Host working directory, command names,
+   descriptions, argument policies, environment mode, environment variable
+   names, and audit status. Prefer workspace-relative paths when calling a Host
+   command. Never infer an executable from `PATH` or from a command that is
+   absent from this response.
 3. Select only a returned command name. If the requested command is absent,
    report that it is unavailable. Do not substitute another command,
    interpreter, build tool, or execution mechanism to bypass the policy.
@@ -38,15 +53,19 @@ Profile returned by the bridge as the authority for the entire bridge session.
    byte counts, truncation flag, `exit_code`, and `duration_ms`. Preserve each
    chunk's `stdout` or `stderr` stream when reporting it.
 6. While `state` is `running`, call `host.exec_status` with the returned
-   `execution_id` and the last `next_cursor`. Use bounded backoff between polls:
-   start near 250 ms and cap at 1 second. Process only chunks after the supplied
-   cursor so output is not duplicated.
-7. Stop polling at `completed`, `failed`, or `cancelled`. Treat a nonzero exit
+   `execution_id`, the last `next_cursor`, and `wait_ms: 10000`. Keep only one
+   status wait in flight. The bridge returns when retained output is available
+   after the cursor, the execution becomes terminal, or the bounded wait
+   expires. Process only chunks after the supplied cursor so output is not
+   duplicated. If the returned state is still `running`, repeat with its new
+   `next_cursor`; omit `wait_ms` or use `0` only when an immediate snapshot is
+   needed.
+7. Stop waiting at `completed`, `failed`, or `cancelled`. Treat a nonzero exit
    code in `completed` as a completed command result, not an MCP transport
    failure. Keep empty streams distinct from unavailable fields, and report
    `output_truncated = true` when the bridge could not retain all output.
 8. If a running operation is no longer wanted, call `host.exec_cancel` with its
-   `execution_id`, then continue status polling until a terminal state confirms
+   `execution_id`, then continue status waiting until a terminal state confirms
    cleanup. Do not assume the immediate cancellation response is terminal.
 
 ## Handle approval and failure
