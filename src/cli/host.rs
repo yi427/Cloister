@@ -7,7 +7,6 @@ use std::{
     io::{self, Write},
     net::SocketAddr,
     path::PathBuf,
-    time::Duration,
 };
 
 use clap::{Args, Subcommand, ValueHint};
@@ -30,6 +29,8 @@ use crate::{
 };
 
 use super::config::default_profile_path;
+
+const STATUS_WAIT_MS: u64 = 10_000;
 
 #[derive(Debug, Args)]
 pub(super) struct HostArgs {
@@ -198,21 +199,19 @@ async fn exec_command(
 
     print_chunks(&output.chunks)?;
     let mut cursor = output.next_cursor;
-    let mut poll_interval = Duration::from_millis(250);
     while output.state == HostExecutionState::Running {
-        tokio::time::sleep(poll_interval).await;
         output = call_host_exec_status(
             endpoint,
             &token,
             &HostExecStatusRequest {
                 execution_id: output.execution_id.clone(),
                 cursor: Some(cursor),
+                wait_ms: Some(STATUS_WAIT_MS),
             },
         )
         .await?;
         print_chunks(&output.chunks)?;
         cursor = output.next_cursor;
-        poll_interval = poll_interval.saturating_mul(2).min(Duration::from_secs(1));
     }
 
     if output.state == HostExecutionState::Completed && output.exit_code == Some(0) {

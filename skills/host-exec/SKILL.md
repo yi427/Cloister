@@ -53,15 +53,19 @@ Profile returned by the bridge as the authority for the entire bridge session.
    byte counts, truncation flag, `exit_code`, and `duration_ms`. Preserve each
    chunk's `stdout` or `stderr` stream when reporting it.
 6. While `state` is `running`, call `host.exec_status` with the returned
-   `execution_id` and the last `next_cursor`. Use bounded backoff between polls:
-   start near 250 ms and cap at 1 second. Process only chunks after the supplied
-   cursor so output is not duplicated.
-7. Stop polling at `completed`, `failed`, or `cancelled`. Treat a nonzero exit
+   `execution_id`, the last `next_cursor`, and `wait_ms: 10000`. Keep only one
+   status wait in flight. The bridge returns when retained output is available
+   after the cursor, the execution becomes terminal, or the bounded wait
+   expires. Process only chunks after the supplied cursor so output is not
+   duplicated. If the returned state is still `running`, repeat with its new
+   `next_cursor`; omit `wait_ms` or use `0` only when an immediate snapshot is
+   needed.
+7. Stop waiting at `completed`, `failed`, or `cancelled`. Treat a nonzero exit
    code in `completed` as a completed command result, not an MCP transport
    failure. Keep empty streams distinct from unavailable fields, and report
    `output_truncated = true` when the bridge could not retain all output.
 8. If a running operation is no longer wanted, call `host.exec_cancel` with its
-   `execution_id`, then continue status polling until a terminal state confirms
+   `execution_id`, then continue status waiting until a terminal state confirms
    cleanup. Do not assume the immediate cancellation response is terminal.
 
 ## Handle approval and failure

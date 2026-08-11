@@ -79,11 +79,11 @@ pub(super) async fn host_exec(
     executions.start(policy, request, working_directory).await
 }
 
-pub(super) fn host_exec_status(
+pub(super) async fn host_exec_status(
     executions: &ExecutionManager,
     request: &HostExecStatusRequest,
 ) -> Result<HostExecStatusOutput, ExecutionError> {
-    executions.status(request)
+    executions.status(request).await
 }
 
 pub(super) fn host_exec_cancel(
@@ -158,7 +158,9 @@ mod tests {
                     .status(&crate::host_bridge::HostExecStatusRequest {
                         execution_id: output.execution_id.clone(),
                         cursor: None,
+                        wait_ms: Some(1_000),
                     })
+                    .await
                     .expect("execution status should exist");
             }
         })

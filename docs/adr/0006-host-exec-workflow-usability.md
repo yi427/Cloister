@@ -1,6 +1,6 @@
 # ADR 0006: Host Exec workflow usability
 
-- Status: Accepted, partially implemented
+- Status: Accepted, implemented
 - Date: 2026-08-11
 - Updates: ADR 0004
 
@@ -68,7 +68,7 @@ directory selection, or weaken the existing working-directory validation.
 
 ### Add bounded waiting to status reads
 
-`host.exec_status` will accept an optional `wait_ms`. A positive value asks the
+`host.exec_status` accepts an optional `wait_ms`. A positive value asks the
 bridge to wait until new output is available after the supplied cursor, the
 execution becomes terminal, or the requested interval expires.
 
@@ -76,6 +76,8 @@ The initial contract is:
 
 - omission or `0` preserves the existing immediate status response;
 - the server caps the effective wait at 30 seconds;
+- at most 32 blocking status waits may be active, and excess waits fail with a
+  typed capacity error without blocking cancellation;
 - expiration returns the current state and cursor without cancelling the
   process;
 - client disconnect does not cancel the process; and
@@ -107,6 +109,8 @@ image remain a tested pair; the updated canonical Skill ships in the image.
   paths.
 - Bounded status waiting consumes one read-only request while waiting but does
   not create another execution or extend execution authority.
+- A bridge-wide limit of 32 blocking status waits bounds the new long-lived
+  request resource without limiting immediate reads or `host.exec_cancel`.
 - Cloister still does not mount Host credential directories, home directories,
   or privileged sockets implicitly.
 
@@ -129,8 +133,8 @@ rollback decision.
 
 ## Validation
 
-The workspace-routing and working-directory discovery portions are implemented
-and verified:
+The workspace-routing, working-directory discovery, and bounded status-wait
+portions are implemented and locally verified:
 
 - the Skill frontmatter excludes shared workspace file operations;
 - the Skill body describes the Guest/Host choice and rejects Base64 plus
@@ -138,6 +142,12 @@ and verified:
 - a focused contract test preserves those instructions;
 - discovery returns the same canonical Host working directory used by
   `host.exec`;
+- omitted or zero waits return immediately, positive waits return for retained
+  output, terminal completion, or expiration, and oversized waits are capped;
+- unknown execution IDs fail before waiting, a dropped status client does not
+  cancel the process, and cursor filtering remains incremental;
+- 32 blocking status waits exhaust the dedicated capacity while immediate
+  reads and cancellation remain available;
 - the Skill validator and repository verification pass;
 - a real Claude session discovered `/Volumes/Home/project/Cloister` and a
   Profile-allowed Host Python reported the same value from `os.getcwd()`,
@@ -146,13 +156,9 @@ and verified:
   appearing immediately in the Host workspace; and
 - the same session discovered the Profile-allowed Host Python and invoked it
   through `host.exec`, reporting `Darwin`, `arm64`, and Python 3.13.15 without
-  confusing it with a Guest file operation.
-
-Before this ADR is fully implemented:
-
-- add status-wait tests for new output, terminal completion, expiration, the
-  service-side cap, unknown execution IDs, and cursor behavior;
-- update the canonical Skill, README, and ADR 0004 references for the connected
-  status-wait schema; and
-- run `make verify` plus real Codex and Claude acceptance for bounded status
-  waiting through Apple `container`.
+  confusing it with a Guest file operation; and
+- real Claude acceptance through Apple `container` observed two output-driven
+  wakes while the execution remained running, a terminal wake with no repeated
+  chunks, an immediate zero-wait snapshot, and a 300 ms expiration followed by
+  a terminal wake. Every call advanced from the latest cursor, only one status
+  wait was active at a time, and status reads required no additional approval.

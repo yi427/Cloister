@@ -237,17 +237,19 @@ The server exposes four tools:
 | --- | --- |
 | `host.list_commands` | Discover the fixed Host working directory, immutable Profile allowlist, and non-secret environment metadata. |
 | `host.exec` | Start one allowed executable with a literal argument vector. |
-| `host.exec_status` | Read state and incremental output using a cursor. |
+| `host.exec_status` | Read state and incremental output, optionally waiting for a change. |
 | `host.exec_cancel` | Cancel an execution and its process group. |
 
 The first policy version allows arbitrary arguments for an allowed executable.
 This broad permission is represented explicitly as `arguments = "any"`.
 
 Long-running work has no global timeout. `host.exec` returns an execution ID
-after a 100 ms inline window, and callers poll `host.exec_status`. The bridge
-limits accidental resource growth to eight concurrent executions, 1 MiB of
-retained output per execution, and 128 in-memory execution records. Jobs and
-captured output do not survive a bridge restart.
+after a 100 ms inline window. Callers can ask `host.exec_status` to wait up to
+30 seconds for retained output or a terminal state instead of repeatedly
+polling unchanged state. The bridge limits accidental resource growth to eight
+concurrent executions, 32 concurrent status waits, 1 MiB of retained output
+per execution, and 128 in-memory execution records. Jobs and captured output
+do not survive a bridge restart.
 
 The canonical model instructions live in
 [`skills/host-exec/SKILL.md`](skills/host-exec/SKILL.md). Codex receives a

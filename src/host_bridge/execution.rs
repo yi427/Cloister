@@ -32,7 +32,9 @@ const CANCELLATION_GRACE_PERIOD: Duration = Duration::from_secs(2);
 const CANCELLATION_KILL_WAIT: Duration = Duration::from_secs(1);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(4);
 const MAX_CONCURRENT_EXECUTIONS: usize = 8;
+const MAX_CONCURRENT_STATUS_WAITS: usize = 32;
 const MAX_RETAINED_EXECUTIONS: usize = 128;
+const MAX_STATUS_WAIT_MS: u64 = 30_000;
 pub(super) const MAX_RETAINED_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// Lifecycle state of one process registered with this bridge instance.
@@ -88,6 +90,8 @@ pub struct HostExecStatusRequest {
     pub execution_id: String,
     #[serde(default)]
     pub cursor: Option<u64>,
+    #[serde(default)]
+    pub wait_ms: Option<u64>,
 }
 
 /// Status responses use the same complete snapshot shape as `host.exec`.
@@ -115,6 +119,7 @@ struct ExecutionRecord {
     started: Instant,
     cancellation: CancellationToken,
     terminal: Notify,
+    status_changed: Notify,
     inner: Mutex<ExecutionRecordState>,
 }
 
@@ -144,6 +149,7 @@ impl ExecutionRecord {
             started: Instant::now(),
             cancellation: CancellationToken::new(),
             terminal: Notify::new(),
+            status_changed: Notify::new(),
             inner: Mutex::new(ExecutionRecordState {
                 state: HostExecutionState::Running,
                 terminal_duration_ms: None,
@@ -185,31 +191,37 @@ impl ExecutionRecord {
     }
 
     fn append_output(&self, stream: HostOutputStream, bytes: &[u8]) {
-        let mut inner = self.inner.lock().expect("execution record poisoned");
-        let byte_count = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        match stream {
-            HostOutputStream::Stdout => {
-                inner.stdout_bytes = inner.stdout_bytes.saturating_add(byte_count);
+        let retained_output = {
+            let mut inner = self.inner.lock().expect("execution record poisoned");
+            let byte_count = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+            match stream {
+                HostOutputStream::Stdout => {
+                    inner.stdout_bytes = inner.stdout_bytes.saturating_add(byte_count);
+                }
+                HostOutputStream::Stderr => {
+                    inner.stderr_bytes = inner.stderr_bytes.saturating_add(byte_count);
+                }
             }
-            HostOutputStream::Stderr => {
-                inner.stderr_bytes = inner.stderr_bytes.saturating_add(byte_count);
-            }
-        }
 
-        let available = MAX_RETAINED_OUTPUT_BYTES.saturating_sub(inner.retained_output_bytes);
-        let retained = available.min(bytes.len());
-        if retained > 0 {
-            inner.next_cursor = inner.next_cursor.saturating_add(1);
-            let cursor = inner.next_cursor;
-            inner.chunks.push(HostOutputChunk {
-                cursor,
-                stream,
-                text: String::from_utf8_lossy(&bytes[..retained]).into_owned(),
-            });
-            inner.retained_output_bytes += retained;
-        }
-        if retained < bytes.len() {
-            inner.output_truncated = true;
+            let available = MAX_RETAINED_OUTPUT_BYTES.saturating_sub(inner.retained_output_bytes);
+            let retained = available.min(bytes.len());
+            if retained > 0 {
+                inner.next_cursor = inner.next_cursor.saturating_add(1);
+                let cursor = inner.next_cursor;
+                inner.chunks.push(HostOutputChunk {
+                    cursor,
+                    stream,
+                    text: String::from_utf8_lossy(&bytes[..retained]).into_owned(),
+                });
+                inner.retained_output_bytes += retained;
+            }
+            if retained < bytes.len() {
+                inner.output_truncated = true;
+            }
+            retained > 0
+        };
+        if retained_output {
+            self.status_changed.notify_waiters();
         }
     }
 
@@ -221,6 +233,7 @@ impl ExecutionRecord {
             inner.exit_code = exit_code;
         }
         self.terminal.notify_waiters();
+        self.status_changed.notify_waiters();
     }
 
     async fn wait_until_terminal(&self, wait: Duration) {
@@ -230,6 +243,25 @@ impl ExecutionRecord {
         }
         let _ = timeout(wait, notified).await;
     }
+
+    fn has_status_after(&self, cursor: u64) -> bool {
+        let inner = self.inner.lock().expect("execution record poisoned");
+        inner.state.is_terminal() || inner.next_cursor > cursor
+    }
+
+    async fn wait_for_status_after(&self, cursor: u64, wait: Duration) {
+        let deadline = Instant::now() + wait;
+        loop {
+            let notified = self.status_changed.notified();
+            if self.has_status_after(cursor) {
+                return;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() || timeout(remaining, notified).await.is_err() {
+                return;
+            }
+        }
+    }
 }
 
 /// One bridge-scoped registry and supervisor for all MCP service instances.
@@ -237,6 +269,7 @@ impl ExecutionRecord {
 pub(super) struct ExecutionManager {
     records: Mutex<HashMap<String, Arc<ExecutionRecord>>>,
     permits: Arc<Semaphore>,
+    status_wait_permits: Arc<Semaphore>,
     audit: AuditLog,
 }
 
@@ -245,6 +278,7 @@ impl ExecutionManager {
         Arc::new(Self {
             records: Mutex::new(HashMap::new()),
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT_EXECUTIONS)),
+            status_wait_permits: Arc::new(Semaphore::new(MAX_CONCURRENT_STATUS_WAITS)),
             audit,
         })
     }
@@ -384,12 +418,30 @@ impl ExecutionManager {
         Ok(record.snapshot(0))
     }
 
-    pub(super) fn status(
+    pub(super) async fn status(
         &self,
         request: &HostExecStatusRequest,
     ) -> Result<HostExecStatusOutput, ExecutionError> {
         let record = self.find(&request.execution_id)?;
-        Ok(record.snapshot(request.cursor.unwrap_or(0)))
+        let cursor = request.cursor.unwrap_or(0);
+        let wait = status_wait_duration(request.wait_ms);
+        let snapshot = record.snapshot(cursor);
+        if wait.is_zero() || snapshot.state.is_terminal() || snapshot.next_cursor > cursor {
+            return Ok(snapshot);
+        }
+
+        let permit = match Arc::clone(&self.status_wait_permits).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) if record.has_status_after(cursor) => return Ok(record.snapshot(cursor)),
+            Err(_) => {
+                return Err(ExecutionError::StatusWaitCapacity {
+                    limit: MAX_CONCURRENT_STATUS_WAITS,
+                });
+            }
+        };
+        record.wait_for_status_after(cursor, wait).await;
+        drop(permit);
+        Ok(record.snapshot(cursor))
     }
 
     pub(super) fn cancel(
@@ -629,6 +681,10 @@ fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
 
+fn status_wait_duration(wait_ms: Option<u64>) -> Duration {
+    Duration::from_millis(wait_ms.unwrap_or(0).min(MAX_STATUS_WAIT_MS))
+}
+
 #[derive(Debug)]
 pub(super) enum ExecutionError {
     Audit(super::AuditLogError),
@@ -637,6 +693,7 @@ pub(super) enum ExecutionError {
     MissingProcessId { command: String },
     Random { detail: String },
     Spawn { command: String, source: io::Error },
+    StatusWaitCapacity { limit: usize },
     UnknownExecution { execution_id: String },
 }
 
@@ -666,6 +723,10 @@ impl fmt::Display for ExecutionError {
                 "{} {command:?}: {source}",
                 message::HOST_EXEC_SPAWN_FAILED
             ),
+            Self::StatusWaitCapacity { limit } => write!(
+                formatter,
+                "Host Exec status wait limit reached ({limit} concurrent waits)"
+            ),
             Self::UnknownExecution { execution_id } => {
                 write!(
                     formatter,
@@ -685,6 +746,7 @@ impl Error for ExecutionError {
             Self::Capacity { .. }
             | Self::MissingProcessId { .. }
             | Self::Random { .. }
+            | Self::StatusWaitCapacity { .. }
             | Self::UnknownExecution { .. } => None,
         }
     }
@@ -692,13 +754,14 @@ impl Error for ExecutionError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use tempfile::tempdir;
 
     use super::{
-        ExecutionManager, ExecutionRecord, HostExecutionState, HostOutputStream,
-        MAX_RETAINED_EXECUTIONS, MAX_RETAINED_OUTPUT_BYTES,
+        ExecutionManager, ExecutionRecord, HostExecCancelRequest, HostExecStatusRequest,
+        HostExecutionState, HostOutputStream, MAX_CONCURRENT_STATUS_WAITS, MAX_RETAINED_EXECUTIONS,
+        MAX_RETAINED_OUTPUT_BYTES, MAX_STATUS_WAIT_MS, status_wait_duration,
     };
     use crate::host_bridge::audit::{AuditController, AuditExecutionMetadata};
 
@@ -719,6 +782,101 @@ mod tests {
         assert!(snapshot.output_truncated);
         assert_eq!(snapshot.chunks.len(), 1);
         assert_eq!(snapshot.chunks[0].text.len(), MAX_RETAINED_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn bounds_the_requested_status_wait() {
+        assert_eq!(status_wait_duration(None), Duration::ZERO);
+        assert_eq!(status_wait_duration(Some(0)), Duration::ZERO);
+        assert_eq!(
+            status_wait_duration(Some(1_250)),
+            Duration::from_millis(1_250)
+        );
+        assert_eq!(
+            status_wait_duration(Some(u64::MAX)),
+            Duration::from_millis(MAX_STATUS_WAIT_MS)
+        );
+    }
+
+    #[tokio::test]
+    async fn bounds_concurrent_status_waiters_without_blocking_ready_snapshots() {
+        let directory = tempdir().expect("temporary directory should exist");
+        let audit = AuditController::start(
+            directory
+                .path()
+                .join("state/cloister/audit/host-exec.jsonl"),
+            "test".to_owned(),
+            "test-agent".to_owned(),
+            directory.path().to_owned(),
+        )
+        .expect("test audit should start");
+        let manager = ExecutionManager::new(audit.log());
+        let record = Arc::new(ExecutionRecord::new(
+            "exec_wait_capacity".to_owned(),
+            "test".to_owned(),
+            AuditExecutionMetadata::test("exec_wait_capacity"),
+        ));
+        manager.register(Arc::clone(&record));
+
+        let mut waiters = Vec::new();
+        for _ in 0..MAX_CONCURRENT_STATUS_WAITS {
+            let manager = Arc::clone(&manager);
+            waiters.push(tokio::spawn(async move {
+                manager
+                    .status(&HostExecStatusRequest {
+                        execution_id: "exec_wait_capacity".to_owned(),
+                        cursor: Some(0),
+                        wait_ms: Some(MAX_STATUS_WAIT_MS),
+                    })
+                    .await
+            }));
+        }
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while manager.status_wait_permits.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("status waiters should acquire every permit");
+
+        let error = manager
+            .status(&HostExecStatusRequest {
+                execution_id: "exec_wait_capacity".to_owned(),
+                cursor: Some(0),
+                wait_ms: Some(MAX_STATUS_WAIT_MS),
+            })
+            .await
+            .expect_err("an additional pending waiter should be rejected");
+        assert!(error.to_string().contains("32 concurrent waits"));
+
+        let immediate = manager
+            .status(&HostExecStatusRequest {
+                execution_id: "exec_wait_capacity".to_owned(),
+                cursor: Some(0),
+                wait_ms: Some(0),
+            })
+            .await
+            .expect("an immediate status read should not require a wait permit");
+        assert_eq!(immediate.state, HostExecutionState::Running);
+        let cancellation = manager
+            .cancel(&HostExecCancelRequest {
+                execution_id: "exec_wait_capacity".to_owned(),
+            })
+            .expect("cancellation should not require a wait permit");
+        assert_eq!(cancellation.state, HostExecutionState::Running);
+        assert!(record.cancellation.is_cancelled());
+
+        record.finish(HostExecutionState::Cancelled, None, 0);
+        for waiter in waiters {
+            let output = waiter
+                .await
+                .expect("status waiter should join")
+                .expect("status waiter should receive the terminal snapshot");
+            assert_eq!(output.state, HostExecutionState::Cancelled);
+        }
+
+        manager.shutdown().await;
+        audit.shutdown().await.expect("test audit should stop");
     }
 
     #[tokio::test]
@@ -759,6 +917,12 @@ mod tests {
 
     #[test]
     fn status_and_cancel_requests_reject_extra_model_fields() {
+        let accepted = serde_json::from_value::<super::HostExecStatusRequest>(serde_json::json!({
+            "execution_id": "exec_test",
+            "cursor": 0,
+            "wait_ms": 10_000
+        }))
+        .expect("bounded status waiting should deserialize");
         let status = serde_json::from_value::<super::HostExecStatusRequest>(serde_json::json!({
             "execution_id": "exec_test",
             "cursor": 0,
@@ -769,6 +933,7 @@ mod tests {
             "signal": "KILL"
         }));
 
+        assert_eq!(accepted.wait_ms, Some(10_000));
         assert!(status.is_err());
         assert!(cancel.is_err());
     }

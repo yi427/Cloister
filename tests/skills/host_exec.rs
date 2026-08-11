@@ -17,7 +17,9 @@ fn describes_only_the_connected_host_tool_surface() {
     assert!(SKILL.contains("Call `host.exec`"));
     assert!(SKILL.contains("call `host.exec_status`"));
     assert!(SKILL.contains("call `host.exec_cancel`"));
-    assert!(SKILL.contains("start near 250 ms and cap at 1 second"));
+    assert!(SKILL.contains("`wait_ms: 10000`"));
+    assert!(SKILL.contains("status wait in flight"));
+    assert!(SKILL.contains("bounded wait"));
 }
 
 #[test]
