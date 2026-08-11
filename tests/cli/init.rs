@@ -12,6 +12,7 @@ use cloister::profile::{
 use tempfile::tempdir;
 
 const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
+const OLD_IMAGE: &str = "ghcr.io/yi427/cloister:0.0.0";
 
 const FAKE_CONTAINER: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$CLOISTER_TEST_COMMAND_LOG"
@@ -313,6 +314,45 @@ fn can_create_only_the_profile_when_container_is_missing() {
     assert!(stdout.contains("[PASS] Profile: 'default'"));
     assert!(stdout.contains("[FAIL] Runtime: failed to start 'container'"));
     assert!(stdout.ends_with("1 check(s) failed; 2 skipped.\n"));
+}
+
+#[test]
+fn creates_an_explicit_custom_image_profile_with_visible_warnings() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let empty_bin = directory.path().join("empty-bin");
+    fs::create_dir_all(&empty_bin).expect("empty bin should be created");
+
+    let output = run(&home, &empty_bin, "\ncloister:dev\n\n\n\n\ny\n", &[]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let profile_path = home.join(".config/cloister/profile.toml");
+    let profile = load_profile(&profile_path).expect("generated Profile should load");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert_eq!(profile.image.reference, "cloister:dev");
+    assert!(stdout.contains("Image compatibility warning:"));
+    assert!(stdout.contains("custom image 'cloister:dev'"));
+    assert!(stdout.contains("[WARN] Image compatibility:"));
+}
+
+#[test]
+fn refuses_an_incompatible_official_image_before_runtime_or_profile_writes() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let empty_bin = directory.path().join("empty-bin");
+    fs::create_dir_all(&empty_bin).expect("empty bin should be created");
+
+    let output = run(&home, &empty_bin, &format!("\n{OLD_IMAGE}\n\n\n\n\n"), &[]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr.contains("official image version mismatch"),
+        "unexpected error: {stderr}"
+    );
+    assert!(stderr.contains("cloister profile upgrade --dry-run"));
+    assert!(!home.join(".config/cloister/profile.toml").exists());
 }
 
 #[test]

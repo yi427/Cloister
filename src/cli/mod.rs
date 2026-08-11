@@ -76,6 +76,7 @@ impl Command {
             Self::Init(arguments) => arguments.execute().await.map_err(CliError::Init),
             Self::Profile(arguments) => arguments
                 .execute()
+                .await
                 .map(|()| ExitCode::SUCCESS)
                 .map_err(CliError::Profile),
         }

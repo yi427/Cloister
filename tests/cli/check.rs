@@ -29,6 +29,22 @@ case "$1:$2:$3" in
 esac
 "#,
 );
+const ANY_IMAGE_RUNTIME: &str = r#"#!/bin/sh
+case "$1:$2:$3" in
+  system:status:--format)
+    printf '%s\n' '{"apiServerVersion":"container-apiserver version 1.2.0","status":"running"}'
+    ;;
+  image:inspect:*)
+    printf '%s\n' '[{"variants":[{"platform":{"architecture":"arm64","os":"linux"}}]}]'
+    ;;
+  system:dns:list)
+    printf '%s\n' '["host.container.internal"]'
+    ;;
+  *)
+    exit 90
+    ;;
+esac
+"#;
 
 #[test]
 fn reports_a_ready_default_environment_without_writing_state() {
@@ -56,6 +72,11 @@ fn reports_a_ready_default_environment_without_writing_state() {
         stdout
             .contains("[PASS] Host policy: enabled, environment inherit-all, 0 allowed command(s)")
     );
+    assert!(stdout.contains(&format!(
+        "[PASS] Image compatibility: CLI {} matches official image {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_VERSION")
+    )));
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
     assert!(stdout.contains(&format!("[PASS] Image: '{RELEASE_IMAGE}' (linux/arm64)")));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
@@ -68,6 +89,73 @@ fn reports_a_ready_default_environment_without_writing_state() {
         !home.join(".local/state/cloister").exists(),
         "check must not create audit state"
     );
+}
+
+#[test]
+fn rejects_an_official_release_image_that_does_not_match_the_cli() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let profile = default_profile_path(&home);
+    let old_image = "ghcr.io/yi427/cloister:0.0.0";
+    fs::create_dir_all(&project).expect("project should be created");
+    write_profile(&profile, None);
+    set_profile_image(&profile, old_image);
+    write_runtime(&bin, ANY_IMAGE_RUNTIME);
+
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout.contains("[FAIL] Image compatibility: official image version mismatch"));
+    assert!(stdout.contains("run 'cloister profile upgrade --dry-run'"));
+    assert!(stdout.contains(&format!("[PASS] Image: '{old_image}' (linux/arm64)")));
+    assert!(stdout.ends_with("1 check(s) failed; 0 skipped.\n"));
+}
+
+#[test]
+fn allows_an_immutable_testing_image_with_a_warning() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let profile = default_profile_path(&home);
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let testing_image = format!("ghcr.io/yi427/cloister:sha-{revision}");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_profile(&profile, None);
+    set_profile_image(&profile, &testing_image);
+    write_runtime(&bin, ANY_IMAGE_RUNTIME);
+
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("[WARN] Image compatibility: immutable testing image"));
+    assert!(stdout.contains(revision));
+    assert!(stdout.contains("release compatibility is not guaranteed"));
+    assert!(stdout.ends_with("All required checks passed; 1 warning(s).\n"));
+}
+
+#[test]
+fn rejects_a_moving_official_image_tag() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let profile = default_profile_path(&home);
+    fs::create_dir_all(&project).expect("project should be created");
+    write_profile(&profile, None);
+    set_profile_image(&profile, "ghcr.io/yi427/cloister:main");
+    write_runtime(&bin, ANY_IMAGE_RUNTIME);
+
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout.contains("[FAIL] Image compatibility: official image tag 'main' is mutable"));
+    assert!(stdout.contains("immutable sha-<full-commit> testing image"));
 }
 
 #[test]
@@ -143,10 +231,11 @@ fn continues_with_independent_checks_when_the_profile_is_missing() {
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("[FAIL] Profile: failed to read profile"));
     assert!(stdout.contains("[SKIP] Host policy: Profile is unavailable"));
+    assert!(stdout.contains("[SKIP] Image compatibility: Profile is unavailable"));
     assert!(stdout.contains("[PASS] Runtime:"));
     assert!(stdout.contains("[SKIP] Image: Profile is unavailable"));
     assert!(stdout.contains("[PASS] DNS:"));
-    assert!(stdout.ends_with("1 check(s) failed; 4 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 5 skipped.\n"));
 }
 
 #[test]
@@ -343,6 +432,16 @@ fn write_profile(path: &Path, command: Option<(&str, PathBuf)>) {
         .expect("config directory should be created");
     let source = toml::to_string_pretty(&profile).expect("Profile should serialize");
     fs::write(path, source).expect("Profile should be written");
+}
+
+fn set_profile_image(path: &Path, reference: &str) {
+    let mut profile = load_profile(path).expect("Profile should load");
+    profile.image.reference = reference.to_owned();
+    fs::write(
+        path,
+        toml::to_string_pretty(&profile).expect("Profile should serialize"),
+    )
+    .expect("Profile should be updated");
 }
 
 fn write_executable(path: &Path) {

@@ -25,6 +25,10 @@ ghcr.io/yi427/cloister:<CARGO_PKG_VERSION>
 For example, Cloister CLI `0.1.0` selects
 `ghcr.io/yi427/cloister:0.1.0`.
 
+The CLI enforces this pair for official release images. An older or newer
+official `X.Y.Z` image fails closed before agent startup, including `--dry-run`
+plans.
+
 ## CLI distribution boundary
 
 The 0.1.x CLI is distributed through the official `yi427/tap` Homebrew tap.
@@ -74,6 +78,11 @@ Cloister does not publish `latest`. Profiles created for normal use must select
 an exact `X.Y.Z` release, never `main` or the moving `X.Y` channel. Published
 `X.Y.Z` and `sha-<full-commit>` tags must never be moved or overwritten; fix a
 bad image by publishing a new patch release.
+
+At runtime, a full `sha-<40-hex>` tag is accepted as an immutable testing image
+with a warning. Official moving tags (`main`, `latest`, and `X.Y`) are rejected.
+Local and third-party image references remain available for development with
+an unverified-compatibility warning.
 
 The `ghcr.io/yi427/cloister` package is public. Every release must verify
 anonymous manifest access before the install command is documented as ready.
@@ -133,6 +142,30 @@ git push origin v0.1.0
 
 The publish workflow rejects a release tag whose version does not exactly
 match the root `cloister` package version in `Cargo.toml`.
+
+## User Profile upgrade path
+
+Installing a newer CLI does not silently rewrite an existing Profile. Users
+can inspect and apply the narrowly scoped official-image update:
+
+```sh
+cloister profile upgrade --dry-run
+cloister profile upgrade
+cloister check
+```
+
+The command accepts only an older official exact-release image in a current
+schema Profile. `--dry-run` performs no image pull or filesystem mutation. The
+apply path checks the target image, asks before pulling when it is absent,
+verifies that it has a Linux ARM64 manifest, then asks separately before it:
+
+1. creates an owner-only backup beside the Profile; and
+2. atomically replaces only the `image` value while preserving comments,
+   unrelated fields, and the original file permissions.
+
+Existing backups are never overwritten. Immutable testing images, custom
+images, future releases, moving official tags, symlinks, and incompatible
+Profile schemas require manual review instead of automatic conversion.
 
 ## 0.1.0 checklist
 

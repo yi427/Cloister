@@ -147,6 +147,46 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
 }
 
 #[test]
+fn refuses_an_official_image_mismatch_before_creating_agent_state() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    fs::create_dir_all(&project).expect("project should be created");
+    write_default_profile(&home);
+    set_default_profile_image(&home, "ghcr.io/yi427/cloister:0.0.0");
+
+    let output = run(&home, &project, None, &["codex", "--dry-run"]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("official image version mismatch"));
+    assert!(stderr.contains("cloister profile upgrade --dry-run"));
+    assert!(!home.join(".local/share/cloister/agents/codex").exists());
+    assert!(!home.join(".local/state/cloister").exists());
+}
+
+#[test]
+fn permits_an_immutable_testing_image_with_a_visible_warning() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    fs::create_dir_all(&project).expect("project should be created");
+    write_default_profile(&home);
+    set_default_profile_image(&home, &format!("ghcr.io/yi427/cloister:sha-{revision}"));
+
+    let output = run(&home, &project, None, &["codex", "--dry-run"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains(&format!("sha-{revision}")));
+    assert!(stderr.contains("cloister: warning: immutable testing image"));
+    assert!(stderr.contains("release compatibility is not guaranteed"));
+}
+
+#[test]
 fn forwards_an_inherited_proxy_by_name_without_rendering_its_value() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
@@ -333,12 +373,21 @@ fn loads_the_default_global_profile_when_present() {
 
     let output = run(&home, &project, None, &["codex", "--dry-run"]);
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert!(output.status.success());
-    assert!(output.stderr.is_empty());
+    assert!(stderr.contains("custom image 'cloister:dev'"));
+    assert!(stderr.contains("release compatibility cannot be verified"));
     assert!(stdout.contains("Profile: global-profile"));
     assert!(stdout.contains("Codex state: ephemeral"));
     assert!(!home.join(".local/share/cloister/agents/codex").exists());
+}
+
+fn set_default_profile_image(home: &Path, reference: &str) {
+    let profile = home.join(".config/cloister/profile.toml");
+    let source = fs::read_to_string(&profile).expect("Profile should be readable");
+    fs::write(&profile, source.replace(RELEASE_IMAGE, reference))
+        .expect("Profile image should be updated");
 }
 
 #[test]
