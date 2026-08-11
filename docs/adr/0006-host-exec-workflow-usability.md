@@ -135,14 +135,15 @@ The workspace-routing portion is implemented and verified:
 - the Skill body describes the Guest/Host choice and rejects Base64 plus
   interpreter file transfer;
 - a focused contract test preserves those instructions;
-- the Skill validator and repository verification pass; and
+- the Skill validator and repository verification pass;
 - a real Claude session used Guest file tools successfully, with changes
-  appearing immediately in the Host workspace.
+  appearing immediately in the Host workspace; and
+- the same session discovered the Profile-allowed Host Python and invoked it
+  through `host.exec`, reporting `Darwin`, `arm64`, and Python 3.13.15 without
+  confusing it with a Guest file operation.
 
 Before this ADR is fully implemented:
 
-- test that a real macOS-native command still selects Host Exec after the Skill
-  change;
 - add focused discovery tests for the canonical Host working directory;
 - add status-wait tests for new output, terminal completion, expiration, the
   service-side cap, unknown execution IDs, and cursor behavior;
