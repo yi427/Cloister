@@ -72,7 +72,7 @@ Install Apple's signed package from the
 
 ## Installation
 
-Cloister 0.1.x is available from the official Homebrew tap. Homebrew installs
+Cloister 0.2.x is available from the official Homebrew tap. Homebrew installs
 the Apple `container` dependency and builds Cloister from the immutable release
 source. It does not start the runtime, create a Profile, or pull the guest
 image.
@@ -86,15 +86,15 @@ Alternatively, install directly from the exact Git tag with Cargo:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.1.0 \
+  --tag v0.2.0 \
   cloister
 ```
 
 The CLI tag and guest image are one release pair:
 
 ```text
-CLI:   v0.1.0
-Image: ghcr.io/yi427/cloister:0.1.0
+CLI:   v0.2.0
+Image: ghcr.io/yi427/cloister:0.2.0
 ```
 
 Cloister refuses to start an agent when an official release image does not
@@ -177,7 +177,7 @@ schema_version = 6
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.1.0"
+reference = "ghcr.io/yi427/cloister:0.2.0"
 architecture = "arm64"
 
 [guest]
@@ -380,7 +380,7 @@ policy.
 
 ## Limitations
 
-Cloister 0.1.x intentionally does not provide:
+Cloister 0.2.x intentionally does not provide:
 
 - Intel Mac, Linux-host, Docker, or general-purpose container-runtime support;
 - a GUI, prebuilt standalone CLI binary, or transparent bidirectional file
