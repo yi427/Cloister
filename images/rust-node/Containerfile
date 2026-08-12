@@ -1,8 +1,8 @@
-FROM docker.io/library/node:24.18.0-bookworm-slim
+FROM docker.io/library/node:24.19.0-bookworm-slim
 
 ARG RUST_VERSION=1.97.1
-ARG CODEX_VERSION=0.146.0
-ARG CLAUDE_CODE_VERSION=2.1.220
+ARG CODEX_VERSION=0.147.0
+ARG CLAUDE_CODE_VERSION=2.1.227
 
 ENV DEBIAN_FRONTEND=noninteractive
 

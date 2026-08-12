@@ -22,8 +22,8 @@ CLI version:
 ghcr.io/yi427/cloister:<CARGO_PKG_VERSION>
 ```
 
-For example, Cloister CLI `0.1.0` selects
-`ghcr.io/yi427/cloister:0.1.0`.
+For example, Cloister CLI `0.2.0` selects
+`ghcr.io/yi427/cloister:0.2.0`.
 
 The CLI enforces this pair for official release images. An older or newer
 official `X.Y.Z` image fails closed before agent startup, including `--dry-run`
@@ -31,7 +31,7 @@ plans.
 
 ## CLI distribution boundary
 
-The 0.1.x CLI is distributed through the official `yi427/tap` Homebrew tap.
+The 0.2.x CLI is distributed through the official `yi427/tap` Homebrew tap.
 The Formula downloads the immutable release archive, verifies its SHA-256,
 installs the Apple `container` runtime dependency, and compiles Cloister with
 Homebrew's Rust toolchain.
@@ -45,7 +45,7 @@ Direct installation from the exact Git tag remains supported:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.1.0 \
+  --tag v0.2.0 \
   cloister
 ```
 
@@ -128,16 +128,16 @@ Before creating a release tag, all of the following must be true:
 11. Run `cloister init`, `cloister check`, and one Codex and Claude smoke test
     against the exact release image.
 12. Create a GitHub Release from the verified tag with reviewed notes and no
-    binary attachments for 0.1.x.
+    binary attachments for 0.2.x.
 13. Update `Formula/cloister.rb` in `yi427/homebrew-tap` to the immutable release
     archive and SHA-256, then audit, install from source, and test the Formula
     before publishing it.
 
-Example for version `0.1.0`:
+Example for version `0.2.0`:
 
 ```sh
-git tag -a v0.1.0 -m "Release Cloister 0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "Release Cloister 0.2.0"
+git push origin v0.2.0
 ```
 
 The publish workflow rejects a release tag whose version does not exactly
@@ -167,20 +167,20 @@ Existing backups are never overwritten. Immutable testing images, custom
 images, future releases, moving official tags, symlinks, and incompatible
 Profile schemas require manual review instead of automatic conversion.
 
-## 0.1.0 checklist
+## 0.2.0 checklist
 
 - [ ] MIT OR Apache-2.0 licensing files and Cargo metadata are present.
 - [ ] `Cargo.toml`, `Cargo.lock`, `cloister --version`, the example Profile, and
-  the default `init` image all resolve to `0.1.0`.
+  the default `init` image all resolve to `0.2.0`.
 - [ ] Local `make verify` passes.
 - [ ] The release commit is pushed and GitHub `Verify` passes.
 - [ ] `main` and `origin/main` identify the same release commit.
-- [ ] Annotated tag `v0.1.0` is created from that commit and pushed once.
-- [ ] Image tags `0.1.0`, `0.1`, and `sha-<release-commit>` exist.
-- [ ] Anonymous GHCR access returns a Linux ARM64 manifest for `0.1.0`.
-- [ ] Source installation from `v0.1.0` succeeds with `--locked`.
+- [ ] Annotated tag `v0.2.0` is created from that commit and pushed once.
+- [ ] Image tags `0.2.0`, `0.2`, and `sha-<release-commit>` exist.
+- [ ] Anonymous GHCR access returns a Linux ARM64 manifest for `0.2.0`.
+- [ ] Source installation from `v0.2.0` succeeds with `--locked`.
 - [ ] `init`, `check`, Codex, Claude, Host Exec, cancellation, and audit smoke
-  tests pass against `ghcr.io/yi427/cloister:0.1.0`.
+  tests pass against `ghcr.io/yi427/cloister:0.2.0`.
 - [ ] A GitHub Release is created with source archives and no binary assets.
 - [ ] The official Homebrew Formula points at the exact release archive and
   passes audit, source installation, and `brew test`.
