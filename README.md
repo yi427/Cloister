@@ -4,28 +4,125 @@
 [![Publish image](https://github.com/yi427/Cloister/actions/workflows/publish-image.yml/badge.svg)](https://github.com/yi427/Cloister/actions/workflows/publish-image.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-Cloister is a terminal-first, privacy-oriented development environment for AI
-coding agents on Apple silicon Macs. It runs Codex and Claude Code inside a
-lightweight Linux virtual machine managed by Apple's [`container`](https://github.com/apple/container)
-CLI, while keeping every host mount and host-command capability explicit.
+Cloister runs Codex and Claude Code inside profile-governed Apple container
+environments on Apple silicon Macs. Workspace mounts, agent state, resources,
+networking, proxy behavior, guest images, and optional host commands remain
+explicit and reviewable.
 
-Cloister is pre-1.0 software. Profile compatibility and security-boundary
-changes may still require deliberate configuration updates between releases.
+![Cloister dry-run preview](docs/assets/terminal-trove-preview.gif)
+
+> [!IMPORTANT]
+> Cloister currently supports Apple silicon Macs with Apple `container` 1.2 or
+> newer. It is pre-1.0 software, so Profile compatibility and security-boundary
+> changes may still require deliberate updates between releases.
 
 ## Why Cloister
 
 AI coding agents are useful precisely because they can inspect files, run
-tools, and modify projects. Cloister makes those capabilities reviewable:
+tools, and modify projects. Cloister keeps that workflow while making its
+authority inspectable:
 
-- the selected project is the only workspace mounted by default;
-- agent credentials and settings live in Cloister-managed state instead of the
-  host's existing `~/.codex` or `~/.claude` directories;
+- only the selected project is mounted as the workspace by default;
+- host credential directories and privileged sockets are never mounted
+  silently;
 - CPU, memory, locale, timezone, user, image, network, and proxy choices come
   from a versioned Profile;
-- optional host execution is enforced by an immutable executable allowlist;
-- runtime plans, readiness checks, and audit records expose the active
-  boundaries without printing secrets; and
-- Codex and Claude Code use the same canonical Host Exec skill and policy.
+- optional macOS commands pass through an authenticated bridge and immutable
+  executable allowlist; and
+- dry-run plans, read-only readiness checks, and audit metadata expose the
+  active boundaries without printing secrets.
+
+## Quick start
+
+### Requirements
+
+- Apple silicon Mac
+- Apple `container` 1.2 or newer
+- a Linux ARM64 Cloister image matching the CLI release
+
+Install Apple's signed package from the
+[`container` releases page](https://github.com/apple/container/releases), or
+allow Homebrew to install it as a dependency in the next step.
+
+### Install
+
+Cloister 0.2.x is available from the official Homebrew tap. The Formula builds
+Cloister from immutable release source. It does not start the runtime, create a
+Profile, or pull the guest image.
+
+```sh
+brew install yi427/tap/cloister
+```
+
+Create the default Profile and prepare missing Apple container components:
+
+```sh
+cloister init
+```
+
+`init` shows and confirms each mutation separately. It can start Apple
+`container`, pull the exact release image, and create the required localhost
+DNS mapping. Existing files, directories, and symbolic links at the Profile
+path are never overwritten.
+
+Verify the complete environment without changing it, then launch an agent in a
+project:
+
+```sh
+cloister check
+
+cd /path/to/project
+cloister codex
+# or: cloister claude
+```
+
+The current directory is mounted at `/workspace`. Select another directory for
+one invocation with `--workspace`.
+
+### Install from the exact Git tag
+
+Direct source installation requires Rust 1.97.1 or newer with Cargo:
+
+```sh
+cargo install --locked \
+  --git https://github.com/yi427/Cloister.git \
+  --tag v0.2.0 \
+  cloister
+```
+
+### Upgrade
+
+The CLI tag and guest image are one release pair:
+
+```text
+CLI:   v0.2.0
+Image: ghcr.io/yi427/cloister:0.2.0
+```
+
+Cloister refuses to start an agent when an official release image does not
+exactly match the CLI version. After upgrading the CLI, preview and apply the
+corresponding Profile update explicitly:
+
+```sh
+cloister profile upgrade --dry-run
+cloister profile upgrade
+cloister check
+```
+
+The upgrade command verifies the replacement Linux ARM64 image before asking
+to back up and atomically update the Profile. It never rewrites a Profile or
+pulls an image during `--dry-run`.
+
+## Security boundaries at a glance
+
+| Boundary | Cloister behavior |
+| --- | --- |
+| Guest root filesystem | Read-only, with an ephemeral container removed after the agent exits. |
+| Workspace | One explicitly selected host directory mounted live at `/workspace` as read-write. |
+| Agent credentials and state | Existing host `~/.codex` and `~/.claude` directories are never mounted; shared state uses separate Cloister-managed directories. |
+| Network | Apple container's default network may reach the internet; it is not an egress firewall. |
+| Host commands | Available only when enabled by the Profile, through an authenticated bridge and fixed executable allowlist, with the invoking macOS user's permissions. |
+| Observability | Dry-run plans, readiness checks, and bounded audit metadata expose active policy without persisting secrets or command output. |
 
 ## Security model
 
@@ -59,88 +156,6 @@ The following claims are intentionally narrow:
 
 Read the accepted architecture decisions under [`docs/adr`](docs/adr) before
 changing these boundaries.
-
-## Requirements
-
-- Apple silicon Mac
-- Apple `container` 1.2 or newer
-- Rust 1.97.1 or newer with Cargo for direct source installation
-- a Linux ARM64 Cloister image matching the CLI release
-
-Install Apple's signed package from the
-[`container` releases page](https://github.com/apple/container/releases).
-
-## Installation
-
-Cloister 0.2.x is available from the official Homebrew tap. Homebrew installs
-the Apple `container` dependency and builds Cloister from the immutable release
-source. It does not start the runtime, create a Profile, or pull the guest
-image.
-
-```sh
-brew install yi427/tap/cloister
-```
-
-Alternatively, install directly from the exact Git tag with Cargo:
-
-```sh
-cargo install --locked \
-  --git https://github.com/yi427/Cloister.git \
-  --tag v0.2.0 \
-  cloister
-```
-
-The CLI tag and guest image are one release pair:
-
-```text
-CLI:   v0.2.0
-Image: ghcr.io/yi427/cloister:0.2.0
-```
-
-Cloister refuses to start an agent when an official release image does not
-exactly match the CLI version. After upgrading the CLI, preview and apply the
-corresponding Profile update explicitly:
-
-```sh
-cloister profile upgrade --dry-run
-cloister profile upgrade
-cloister check
-```
-
-The upgrade command verifies the replacement Linux ARM64 image before asking
-to back up and atomically update the Profile. It never rewrites a Profile or
-pulls an image during `--dry-run`.
-
-## Quick start
-
-Create the default Profile interactively:
-
-```sh
-cloister init
-```
-
-`init` can start Apple `container`, pull the exact release image, and create
-the required localhost DNS mapping. Every mutation is shown and confirmed
-separately. Existing files, directories, and symbolic links at the Profile
-path are never overwritten.
-
-Verify the complete environment without changing it:
-
-```sh
-cloister check
-```
-
-Then launch an agent in a project:
-
-```sh
-cd /path/to/project
-cloister codex
-# or
-cloister claude
-```
-
-The current directory is mounted at `/workspace`. Select another directory for
-one invocation with `--workspace`.
 
 ## Architecture
 
