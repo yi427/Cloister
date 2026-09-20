@@ -38,7 +38,7 @@ use crate::{
     },
 };
 
-use super::config::default_profile_path;
+use super::{config::default_profile_path, signals::SignalGuard};
 
 #[derive(Debug, Args)]
 pub(super) struct AgentArgs {
@@ -619,24 +619,5 @@ impl From<BridgeTokenError> for AgentCommandError {
 impl From<HostExecPolicyBuildError> for AgentCommandError {
     fn from(error: HostExecPolicyBuildError) -> Self {
         Self::BridgePolicy(error)
-    }
-}
-
-struct SignalGuard(JoinHandle<()>);
-impl SignalGuard {
-    fn start(cancellation: CancellationToken) -> io::Result<Self> {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut interrupt = signal(SignalKind::interrupt())?;
-        let mut terminate = signal(SignalKind::terminate())?;
-        let mut hangup = signal(SignalKind::hangup())?;
-        Ok(Self(tokio::spawn(async move {
-            tokio::select! { _ = interrupt.recv() => (), _ = terminate.recv() => (), _ = hangup.recv() => () }
-            cancellation.cancel();
-        })))
-    }
-}
-impl Drop for SignalGuard {
-    fn drop(&mut self) {
-        self.0.abort();
     }
 }

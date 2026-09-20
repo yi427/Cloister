@@ -7,6 +7,26 @@ mod profile_check;
 mod profile_upgrade;
 mod software;
 
+fn write_fake_pfctl(bin: &std::path::Path) {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    fs::create_dir_all(bin).unwrap();
+    let path = bin.join("pfctl");
+    fs::write(&path, include_str!("../fixtures/packet-filter/pfctl.sh")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn with_connectivity_probe(contents: &str) -> String {
+    contents.replacen(
+        "#!/bin/sh\n",
+        concat!(
+            "#!/bin/sh\n",
+            include_str!("../fixtures/connectivity-runtime.sh"),
+            "\n"
+        ),
+        1,
+    )
+}
+
 fn seed_software(home: &std::path::Path, agent: &str) {
     use std::{
         fs,

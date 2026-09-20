@@ -29,7 +29,7 @@ authority inspectable:
   from a versioned Profile;
 - optional macOS commands pass through an authenticated bridge and immutable
   executable allowlist; and
-- dry-run plans, read-only readiness checks, and audit metadata expose the
+- dry-run plans, readiness checks, and audit metadata expose the
   active boundaries without printing secrets.
 
 > [!NOTE]
@@ -379,6 +379,33 @@ Confirm it with `container system dns list`. Apple documents that creating a
 localhost domain disables Private Relay and that its packet-filter rule is
 removed on restart. `cloister check` reports when the mapping is absent.
 
+When Host Exec or an inherited loopback proxy needs host forwarding, `check`
+also parses `/etc/pf.conf` with `pfctl -n -v -f` (no rules are loaded). It fails
+if the expanded configuration lacks the `com.apple.container` redirect anchor
+or the expected `203.0.113.113 -> 127.0.0.1` rule. A leftover rule file without
+a reference in the main configuration is not enough.
+
+The check then starts a temporary loopback HTTP listener and a one-shot container
+using the already-available Profile image. The container sends a direct request
+to `host.container.internal` over IPv4 with a unique probe path. Success requires both a
+successful HTTP request and receipt at this check's listener. This tests the
+actual host-forwarding path without administrator access or reading live PF
+rules. It does not test MCP authentication/protocol behavior or model API access.
+
+The probe has a read-only root, no project or credential mounts, no inherited
+proxy settings, and no Agent installation. It uses one CPU and 256 MiB of guest
+memory. The request bypasses proxies and does not follow redirects. The container
+is removed after exit; timeout or SIGINT/SIGTERM/SIGHUP requests removal of its
+unique container name. The probe has a 20-second deadline, followed by up to
+15 seconds for interrupted-container cleanup. The temporary listener is released
+on completion. Runtime cleanup failures identify the container to inspect.
+Missing/incompatible images or invalid forwarding configuration skip the probe.
+No Profile, PF rules, or DNS configuration is changed, and `sudo` is never invoked.
+
+For a disconnected mapping, `check` prints the explicit delete/create commands
+to rebuild it through Apple container. These commands reload host PF rules and
+are not run by the check. Existing DNS domains must be deleted before recreation.
+
 ### Audit log
 
 Host Exec writes versioned JSONL lifecycle metadata to:
@@ -405,7 +432,7 @@ policy and audit design.
 | Command | Description |
 | --- | --- |
 | `cloister init` | Interactively create a new Profile and prepare missing Apple container components. |
-| `cloister check` | Read-only readiness check for Profile, proxy policy, host paths, runtime, image, and DNS. |
+| `cloister check` | Inspect Profile, proxy policy, host paths, runtime, image, DNS and PF configuration; test host forwarding with a temporary container. |
 | `cloister codex` | Run Codex in the selected project. |
 | `cloister claude` | Run Claude Code in the selected project. |
 | `cloister profile check <PATH>` | Parse and statically validate one Profile without inspecting runtime state. |

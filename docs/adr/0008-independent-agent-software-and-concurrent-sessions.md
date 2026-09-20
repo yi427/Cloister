@@ -29,7 +29,9 @@ An automatic update check failure may reuse a previously installed version, with
 a warning. No cached version, an explicit update failure, or corrupt metadata
 fails launch. Exact-version selection supports rollback without changing the
 default latest selection. Offline means no software checks/downloads, not blocked
-internet. Dry-run and check remain read-only. Old installations are retained to
+internet. Dry-run and software inspection remain read-only. The readiness check
+also uses a temporary container and loopback listener to test host forwarding,
+without changing Profile, DNS, or PF configuration. Old installations are retained to
 avoid removing files used by active sessions. Garbage collection is deferred.
 
 Every session binds loopback port 0 by default, then injects the actual bound

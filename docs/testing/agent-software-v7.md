@@ -64,6 +64,17 @@ make format
 make verify
 ```
 
+## Host connectivity check
+
+The readiness check now also verifies expanded PF configuration and performs an
+IPv4 HTTP request from a temporary container to its own host loopback listener.
+This passed on the same local image on 2026-09-20 without administrator access,
+Agent credentials, or project mounts. The container was removed after the check.
+Initial DNS resolution took about five seconds in live testing, so the probe
+allows eight seconds for DNS/connect and ten seconds for the request, within a
+twenty-second overall deadline. Deterministic tests cover failed requests,
+false-success exits, mismatched probe paths, timeout, and signal cleanup.
+
 ## Remaining release acceptance
 
 Version output does not prove authenticated coding, skill selection, MCP

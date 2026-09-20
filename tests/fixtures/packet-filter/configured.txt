@@ -1,0 +1,6 @@
+scrub-anchor "com.apple.container" all fragment reassemble
+nat-anchor "com.apple.container" all
+rdr-anchor "com.apple.container" all
+rdr-anchor "/*" all
+anchor "com.apple.container" all
+rdr inet from any to 203.0.113.113 -> 127.0.0.1

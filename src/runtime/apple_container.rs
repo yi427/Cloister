@@ -521,3 +521,41 @@ pub fn name_container(command: &mut CommandSpec, name: &str) {
 pub fn delete_container_command(name: &str) -> CommandSpec {
     apple_container_command(["delete", "--force", name])
 }
+
+/// A short HTTP probe without project/state mounts or inherited proxy credentials.
+/// The caller verifies that the selected image is already available before launch.
+pub fn host_connectivity_command(profile: &Profile, name: &str, endpoint: &str) -> CommandSpec {
+    let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
+    command.flag("--rm");
+    command.option("--name", name);
+    command.flag("--read-only");
+    command.option("--arch", architecture_argument(profile.image.architecture));
+    command.option("--user", &profile.guest.user);
+    command.option("--workdir", "/tmp");
+    command.option("--tmpfs", "/tmp");
+    command.option("--cpus", "1");
+    command.option("--memory", "256M");
+    command.option("--network", network_argument(profile.network.mode));
+    command.option("--entrypoint", "/usr/bin/curl");
+    // Ignore both image-provided curl configuration and all proxy variables.
+    // Local DNS may retry after ~5s; allow it to finish before reporting failure.
+    command.container_command = [
+        "--disable",
+        "--ipv4",
+        "--noproxy",
+        "*",
+        "--proto",
+        "=http",
+        "--fail",
+        "--silent",
+        "--connect-timeout",
+        "8",
+        "--max-time",
+        "10",
+        endpoint,
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect();
+    command.finish()
+}

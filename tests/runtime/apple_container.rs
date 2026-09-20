@@ -21,6 +21,50 @@ use tempfile::tempdir;
 
 const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
 
+#[test]
+fn connectivity_probe_has_bounded_resources_and_no_host_mounts_or_secrets() {
+    let mut profile = load_profile(fixture("valid/default.toml")).unwrap();
+    profile.network.proxy = NetworkProxyMode::Inherit;
+    let endpoint = "http://host.container.internal:12345/cloister-check/test-nonce";
+    let command =
+        cloister::runtime::host_connectivity_command(&profile, "cloister-check-test", endpoint);
+    let args: Vec<_> = command
+        .arguments()
+        .iter()
+        .map(|s| s.to_str().unwrap())
+        .collect();
+    assert_eq!(command.program(), "container");
+    assert!(command.secret_environment_names().next().is_none());
+    for forbidden in [
+        "--mount",
+        "--volume",
+        "--ssh",
+        "--env",
+        "--interactive",
+        "--tty",
+    ] {
+        assert!(!args.contains(&forbidden));
+    }
+    assert!(args.contains(&"--rm"));
+    assert!(args.contains(&"--read-only"));
+    assert!(args.contains(&"--ipv4"));
+    for pair in [
+        ["--cpus", "1"],
+        ["--memory", "256M"],
+        ["--entrypoint", "/usr/bin/curl"],
+        ["--noproxy", "*"],
+        ["--connect-timeout", "8"],
+        ["--max-time", "10"],
+    ] {
+        assert!(args.windows(2).any(|window| window == pair));
+    }
+    assert_eq!(args.last(), Some(&endpoint));
+    assert!(
+        args.windows(3)
+            .any(|window| window == ["--", profile.image.reference.as_str(), "--disable"])
+    );
+}
+
 fn fixture(relative_path: impl AsRef<Path>) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/profiles")

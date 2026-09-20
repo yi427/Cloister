@@ -91,8 +91,10 @@ initialization.
 `check` resolves and validates the selected policy using one environment
 snapshot. It reports disabled, missing, invalid, remote, or loopback-rewritten
 state without displaying values. It deliberately does not contact a proxy or a
-third-party endpoint: reachability is destination-specific and a read-only
-configuration check must not create hidden network traffic.
+third-party endpoint: reachability is destination-specific. In V7, `check` also
+announces and runs a temporary container-to-host HTTP probe that bypasses proxies
+and tests local forwarding without contacting an external service. It does not
+test whether the inherited proxy reaches a model endpoint.
 
 Natural Codex and Claude launches use the same resolved snapshot for the
 inspectable runtime plan and the actual `container` process. A Profile/runtime

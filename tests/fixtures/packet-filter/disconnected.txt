@@ -1,0 +1,4 @@
+scrub-anchor "/*" all fragment reassemble
+nat-anchor "/*" all
+rdr-anchor "/*" all
+anchor "/*" all

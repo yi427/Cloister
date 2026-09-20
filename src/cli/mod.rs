@@ -8,6 +8,7 @@ mod config;
 mod host;
 mod init;
 mod profile;
+mod signals;
 
 use std::{error::Error, fmt, process::ExitCode};
 
@@ -37,7 +38,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Check whether Cloister is ready to launch an agent.
+    /// Check readiness, including a temporary container-to-host connectivity probe.
     Check(CheckArgs),
     /// Run Claude Code in the selected project.
     Claude(ClaudeArgs),

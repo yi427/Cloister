@@ -1,4 +1,7 @@
-//! Read-only readiness checks for the natural agent workflow.
+//! Readiness checks with a temporary container-to-host connectivity probe.
+
+mod connectivity;
+mod forwarding;
 
 use std::{env, path::PathBuf, process::ExitCode};
 
@@ -71,21 +74,57 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
     }
     let runtime_ready = record_result(&mut report, "Runtime", check_runtime().await);
 
-    match (&profile, runtime_ready) {
+    let image_ready = match (&profile, runtime_ready) {
         (Some(profile), true) => {
-            record_result(&mut report, "Image", check_image(profile).await);
+            record_result(&mut report, "Image", check_image(profile).await)
+                && classify_image(&profile.image.reference).is_ok()
         }
-        (None, _) => report.skip("Image", "Profile is unavailable"),
-        (Some(_), false) => report.skip("Image", "runtime is unavailable"),
-    }
+        (None, _) => {
+            report.skip("Image", "Profile is unavailable");
+            false
+        }
+        (Some(_), false) => {
+            report.skip("Image", "runtime is unavailable");
+            false
+        }
+    };
 
-    if runtime_ready {
-        record_result(&mut report, "DNS", check_dns().await);
+    let dns_ready = if runtime_ready {
+        record_result(&mut report, "DNS", check_dns().await)
     } else {
         report.skip("DNS", "runtime is unavailable");
+        false
+    };
+
+    let forwarding_skip = match &profile {
+        None => Some("Profile is unavailable"),
+        Some(profile) if !requires_forwarding(profile) => {
+            Some("Host Exec and loopback proxy forwarding are not required by this Profile")
+        }
+        Some(_) if !dns_ready => Some("runtime or DNS configuration is unavailable"),
+        Some(_) => None,
+    };
+    if let Some(reason) = forwarding_skip {
+        report.skip("PF configuration", reason);
+        report.skip("Host connectivity", reason);
+    } else {
+        forwarding::check(
+            &mut report,
+            profile.as_ref().expect("validated Profile"),
+            image_ready,
+        )
+        .await;
     }
 
     report.finish()
+}
+
+fn requires_forwarding(profile: &Profile) -> bool {
+    profile.host.exec.enabled
+        || resolve_guest_proxy(profile.network.proxy, env::vars_os())
+            .ok()
+            .flatten()
+            .is_some_and(|proxy| proxy.loopback_rewritten())
 }
 
 fn check_image_compatibility(profile: &Profile, report: &mut CheckReport) {
@@ -255,7 +294,9 @@ async fn check_dns() -> Result<String, String> {
         ));
     }
 
-    Ok(format!("'{HOST_BRIDGE_GUEST_NAME}' is configured"))
+    Ok(format!(
+        "'{HOST_BRIDGE_GUEST_NAME}' is configured (DNS registration only)"
+    ))
 }
 
 pub(super) async fn command_output(command: &CommandSpec) -> Result<Vec<u8>, String> {

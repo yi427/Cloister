@@ -313,7 +313,7 @@ fn can_create_only_the_profile_when_container_is_missing() {
     assert!(stdout.contains("Create the Profile without runtime setup? [y/N]:"));
     assert!(stdout.contains("[PASS] Profile: 'default'"));
     assert!(stdout.contains("[FAIL] Runtime: failed to start 'container'"));
-    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 2 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 4 skipped.\n"));
 }
 
 #[test]
@@ -433,6 +433,11 @@ fn refuses_a_broken_symbolic_link_as_an_existing_target() {
 fn write_executable(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().expect("executable should have a parent"))
         .expect("bin directory should be created");
+    let contents = if path.file_name().is_some_and(|name| name == "container") {
+        super::with_connectivity_probe(contents)
+    } else {
+        contents.to_owned()
+    };
     fs::write(path, contents).expect("fake executable should be written");
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))
         .expect("fake executable should be executable");
@@ -458,13 +463,17 @@ fn run(home: &Path, path: &Path, input: &str, environment: &[(&str, &Path)]) -> 
 }
 
 fn init_command(home: &Path, path: &Path) -> Command {
+    super::write_fake_pfctl(path);
     let mut command = Command::new(env!("CARGO_BIN_EXE_cloister"));
     command
         .arg("init")
         .env("HOME", home)
         .env("PATH", path)
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_DATA_HOME");
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("TEST_PF_CONFIG")
+        .env_remove("TEST_PROBE_MODE")
+        .env_remove("TEST_PROBE_RECORD");
     for name in [
         "HTTP_PROXY",
         "HTTPS_PROXY",
