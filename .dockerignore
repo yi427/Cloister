@@ -2,6 +2,7 @@
 !images/
 !images/rust-node/
 !images/rust-node/Containerfile
+!images/rust-node/install-agent.sh
 !images/rust-node/entrypoint.sh
 !images/rust-node/profile.sh
 !skills/

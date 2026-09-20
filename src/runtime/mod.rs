@@ -6,11 +6,11 @@ mod plan;
 
 pub use apple_container::{
     APPLE_CONTAINER_PROGRAM, HOST_BRIDGE_GUEST_NAME, HOST_BRIDGE_LOCALHOST_ADDRESS,
-    HostBridgeLaunch, RuntimePlanError, dns_create_command, dns_list_command,
-    image_inspect_command, image_pull_command, plan_agent_container, system_start_command,
-    system_status_command,
+    HostBridgeLaunch, RuntimePlanError, agent_install_command, delete_container_command,
+    dns_create_command, dns_list_command, image_inspect_command, image_pull_command,
+    name_container, plan_agent_container, system_start_command, system_status_command,
 };
-pub use executor::{RuntimeExecutionError, execute, execute_output};
+pub use executor::{RuntimeExecutionError, execute, execute_managed, execute_output};
 pub use plan::{
     AgentStateMount, CommandSpec, GuestProxyPlan, HostCommandPlan, NetworkExposure, RuntimePlan,
     WorkspaceMount,

@@ -30,7 +30,7 @@ use super::super::{
 
 #[derive(Debug, Args)]
 pub(super) struct ProfileUpgradeArgs {
-    /// Profile V6 TOML file to upgrade.
+    /// Profile V7 TOML file to upgrade.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn replaces_only_the_spanned_image_reference() {
-        let source = r#"schema_version = 6
+        let source = r#"schema_version = 7
 name = "example"
 
 [image]
@@ -470,6 +470,9 @@ proxy = "disabled"
 
 [agent]
 state = "isolated"
+codex = "latest"
+claude = "latest"
+update_interval_hours = 24
 
 [host.exec]
 enabled = false

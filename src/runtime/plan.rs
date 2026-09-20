@@ -9,6 +9,7 @@ use std::{
 /// Complete execution plan for one development environment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimePlan {
+    pub(super) software: PathBuf,
     pub(super) profile_name: String,
     pub(super) agent_name: String,
     pub(super) network: NetworkExposure,
@@ -56,6 +57,10 @@ impl RuntimePlan {
 
     pub fn host_commands(&self) -> &[HostCommandPlan] {
         &self.host_commands
+    }
+
+    pub fn command_mut(&mut self) -> &mut CommandSpec {
+        &mut self.command
     }
 
     pub fn command(&self) -> &CommandSpec {
@@ -150,6 +155,11 @@ impl fmt::Display for RuntimePlan {
             writeln!(formatter, "Host bridge: disabled")?;
         }
 
+        writeln!(
+            formatter,
+            "Agent software: {} -> /cloister/software (read-only)",
+            self.software.display()
+        )?;
         writeln!(formatter, "Agent: {}", self.agent_name)?;
         writeln!(formatter, "Lifecycle: run and remove after exit")?;
         writeln!(formatter, "Command:")?;

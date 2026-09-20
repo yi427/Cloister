@@ -20,7 +20,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct CheckArgs {
-    /// Path to a Profile V6 TOML file.
+    /// Path to a Profile V7 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -47,6 +47,20 @@ pub(super) async fn execute_checks(profile_path: Option<PathBuf>) -> ExitCode {
                 report.skip("Host audit", "Host Exec is disabled by Profile");
             }
             check_image_compatibility(profile, &mut report);
+            for agent in [
+                &crate::agent::CodexAgent as &dyn crate::agent::AgentAdapter,
+                &crate::agent::ClaudeAgent,
+            ] {
+                let options = crate::agent::software::SoftwareOptions::default();
+                let selector = crate::agent::software::selected_version(profile, agent, &options);
+                let result = crate::agent::software::software_directory(agent)
+                    .and_then(|root| crate::agent::software::inspect(&root, profile, selector));
+                match result {
+                    Ok(Some(software)) => report.pass("Agent software", format!("{} {} (requested {}; installed, integration compatibility not certified)", agent.display_name(), software.version, selector.as_str())),
+                    Ok(None) => report.warn("Agent software", format!("{} {}: download required on first launch", agent.display_name(), selector.as_str())),
+                    Err(error) => report.fail("Agent software", error.to_string()),
+                }
+            }
         }
         None => {
             report.skip("Guest proxy", "Profile is unavailable");
@@ -197,7 +211,9 @@ async fn check_runtime() -> Result<String, String> {
         return Err(format!("Apple container service is {}", status.status));
     }
 
-    Ok(status.api_server_version)
+    status
+        .version()
+        .ok_or_else(|| "running Apple container service omitted its version".to_owned())
 }
 
 async fn check_image(profile: &Profile) -> Result<String, String> {
@@ -312,9 +328,24 @@ fn record_result(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeStatus {
-    api_server_version: String,
-    status: String,
+pub(super) struct RuntimeStatus {
+    api_server_version: Option<String>,
+    server: Option<RuntimeServer>,
+    pub(super) status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeServer {
+    version: String,
+}
+
+impl RuntimeStatus {
+    pub(super) fn version(&self) -> Option<String> {
+        self.server
+            .as_ref()
+            .map(|server| format!("container-apiserver version {}", server.version))
+            .or_else(|| self.api_server_version.clone())
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -132,8 +132,10 @@ pub fn plan_agent_container(
     host_bridge: Option<HostBridgeLaunch<'_>>,
     guest_proxy: Option<&ResolvedGuestProxy>,
     agent_arguments: &[OsString],
+    software: &Path,
 ) -> Result<RuntimePlan, RuntimePlanError> {
     reject_mount_separator(resolved.workspace())?;
+    reject_mount_separator(software)?;
 
     let workspace = WorkspaceMount {
         host: resolved.workspace().to_owned(),
@@ -204,8 +206,23 @@ pub fn plan_agent_container(
         guest_proxy,
         agent_command,
     );
+    let mut command = command;
+    // Insert the software mount before the image delimiter.
+    let boundary = command
+        .arguments
+        .iter()
+        .position(|arg| arg == "--")
+        .expect("image delimiter");
+    command.arguments.splice(
+        boundary..boundary,
+        [
+            OsString::from("--mount"),
+            read_only_software_mount(software),
+        ],
+    );
 
     Ok(RuntimePlan {
+        software: software.to_owned(),
         profile_name: resolved.profile().name.clone(),
         agent_name: agent.display_name().to_owned(),
         network: network_exposure(resolved.profile().network.mode),
@@ -240,21 +257,7 @@ fn build_run_command(
     command.environment("LANG", &profile.guest.locale);
     command.environment("LC_ALL", &profile.guest.locale);
     command.environment("TZ", &profile.guest.timezone);
-    if let Some(proxy) = guest_proxy {
-        for name in [
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "ALL_PROXY",
-            "http_proxy",
-            "https_proxy",
-            "all_proxy",
-        ] {
-            command.forward_redacted_environment(name, Some(proxy.proxy_url()));
-        }
-        for name in ["NO_PROXY", "no_proxy"] {
-            command.forward_redacted_environment(name, Some(proxy.no_proxy()));
-        }
-    }
+    add_proxy(&mut command, guest_proxy);
     if let Some(state) = agent_state {
         command.environment(agent.state_environment(), state.guest());
     }
@@ -266,6 +269,7 @@ fn build_run_command(
     command.flag("--tty");
     command.flag("--read-only");
     command.option("--tmpfs", "/tmp");
+    command.option("--tmpfs", "/cloister/session:mode=1777");
     command.option("--network", network_argument(profile.network.mode));
     command.option(
         "--mount",
@@ -444,4 +448,76 @@ impl Error for RuntimePlanError {
             | Self::HostExecDisabled => None,
         }
     }
+}
+
+fn add_proxy(command: &mut ContainerRunCommandBuilder, proxy: Option<&ResolvedGuestProxy>) {
+    if let Some(proxy) = proxy {
+        for name in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            command.forward_redacted_environment(name, Some(proxy.proxy_url()));
+        }
+        for name in ["NO_PROXY", "no_proxy"] {
+            command.forward_redacted_environment(name, Some(proxy.no_proxy()));
+        }
+    }
+}
+
+fn read_only_software_mount(path: &Path) -> OsString {
+    let mut mount = bind_mount_argument(path, Path::new("/cloister/software"));
+    mount.push(",readonly");
+    mount
+}
+
+/// A preparation container can write only its staging directory, never project/state.
+pub fn agent_install_command(
+    profile: &Profile,
+    agent: &dyn AgentAdapter,
+    selector: &crate::profile::AgentVersion,
+    installed_version: Option<&str>,
+    staging: &Path,
+    proxy: Option<&ResolvedGuestProxy>,
+) -> Result<CommandSpec, RuntimePlanError> {
+    reject_mount_separator(staging)?;
+    let mut command = ContainerRunCommandBuilder::new(&profile.image.reference);
+    command.flag("--rm");
+    command.flag("--read-only");
+    command.option("--arch", "arm64");
+    command.option("--cpus", profile.guest.cpus.get().to_string());
+    command.option("--memory", profile.guest.memory.to_string());
+    command.option("--user", &profile.guest.user);
+    command.option("--workdir", "/tmp");
+    command.option("--tmpfs", "/tmp");
+    command.option("--tmpfs", "/cloister/session:mode=1777");
+    command.option("--network", network_argument(profile.network.mode));
+    command.option(
+        "--mount",
+        bind_mount_argument(staging, Path::new("/cloister/install")),
+    );
+    command.option("--entrypoint", "/usr/local/bin/cloister-install-agent");
+    add_proxy(&mut command, proxy);
+    command.agent_command(AgentCommand::new(
+        agent.state_directory_name(),
+        vec![
+            selector.as_str().into(),
+            installed_version.unwrap_or("").into(),
+        ],
+    ));
+    Ok(command.finish())
+}
+
+/// Assigns a unique name before launch so interrupted runs can be removed precisely.
+pub fn name_container(command: &mut CommandSpec, name: &str) {
+    command
+        .arguments
+        .splice(1..1, [OsString::from("--name"), OsString::from(name)]);
+}
+
+pub fn delete_container_command(name: &str) -> CommandSpec {
+    apple_container_command(["delete", "--force", name])
 }

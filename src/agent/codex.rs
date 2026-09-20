@@ -4,7 +4,7 @@ use std::{ffi::OsString, path::Path};
 
 use super::{AgentAdapter, AgentCommand, AgentHostBridge};
 
-/// Adapter for the Codex CLI bundled in the Cloister image.
+/// Adapter for the Codex CLI installed in the Cloister software cache.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CodexAgent;
 
@@ -31,6 +31,7 @@ impl AgentAdapter for CodexAgent {
         arguments: &[OsString],
     ) -> AgentCommand {
         let mut command_arguments = Vec::new();
+        push_config(&mut command_arguments, "check_for_update_on_startup=false");
         if let Some(bridge) = host_bridge {
             push_config(
                 &mut command_arguments,
@@ -88,7 +89,8 @@ mod tests {
         let command = CodexAgent.build_command(None, &forwarded);
 
         assert_eq!(command.executable(), OsStr::new("codex"));
-        assert_eq!(command.arguments(), forwarded);
+        assert!(command.arguments().ends_with(&forwarded));
+        assert_eq!(command.arguments()[1], "check_for_update_on_startup=false");
     }
 
     #[test]

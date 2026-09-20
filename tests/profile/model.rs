@@ -1,4 +1,4 @@
-//! Public Profile V6 model integration tests.
+//! Public Profile V7 model integration tests.
 
 use std::{collections::BTreeMap, ffi::OsString, path::Path};
 
@@ -13,7 +13,7 @@ use cloister::{
 };
 
 #[test]
-fn constructs_profile_v6_through_the_public_api() {
+fn constructs_profile_v7_through_the_public_api() {
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
         name: "rust-default".to_owned(),
@@ -33,6 +33,9 @@ fn constructs_profile_v6_through_the_public_api() {
             proxy: NetworkProxyMode::Disabled,
         },
         agent: AgentProfile {
+            codex: Default::default(),
+            claude: Default::default(),
+            update_interval_hours: 24,
             state: AgentState::Isolated,
         },
         host: HostProfile {
@@ -51,7 +54,7 @@ fn constructs_profile_v6_through_the_public_api() {
         },
     };
 
-    assert_eq!(profile.schema_version, 6);
+    assert_eq!(profile.schema_version, 7);
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);

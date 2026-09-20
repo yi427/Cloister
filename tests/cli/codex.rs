@@ -86,7 +86,7 @@ fn keeps_the_shared_agent_command_help() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Path to a Profile V6 TOML file"));
+    assert!(stdout.contains("Path to a Profile V7 TOML file"));
     assert!(stdout.contains("Print the runtime plan without starting the agent"));
     assert!(stdout.contains("Arguments passed directly to the agent"));
 }
@@ -117,7 +117,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
         state.display()
     )));
     assert!(stdout.contains("\"CODEX_HOME=/cloister/agents/codex\""));
-    assert!(stdout.contains("Host bridge: http://host.container.internal:17834/mcp"));
+    assert!(stdout.contains("Host bridge: http://host.container.internal:0/mcp"));
     assert!(stdout.contains(&format!(
         "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
         home.join(".local/state/cloister/audit/host-exec.jsonl")
@@ -220,6 +220,7 @@ printf '%s\n' "$@"
     fs::write(&profile_path, profile).expect("proxy Profile should be written");
 
     let proxy_value = format!("http://user:{secret}@127.0.0.1:3080");
+    super::seed_software(&home, "codex");
     let output = run_with_environment(
         &home,
         &project,
@@ -405,6 +406,7 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
         .expect("fake runtime should be executable");
     let profile = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/profile.toml");
 
+    super::seed_software(&home, "codex");
     let output = run(
         &home,
         &project,
@@ -422,7 +424,9 @@ fn passes_codex_arguments_directly_and_returns_the_runtime_exit_code() {
 
     assert_eq!(output.status.code(), Some(9));
     assert!(output.stderr.is_empty());
-    assert!(stdout.ends_with(&format!("--\n{RELEASE_IMAGE}\ncodex\n--version\n")));
+    assert!(stdout.ends_with(&format!(
+        "--\n{RELEASE_IMAGE}\ncodex\n--config\ncheck_for_update_on_startup=false\n--version\n"
+    )));
     assert_eq!(
         fs::metadata(home.join(".local/share/cloister/agents/codex"))
             .expect("state metadata should be available")
@@ -457,6 +461,7 @@ fn starts_the_default_bridge_and_forwards_only_the_token_name() {
     write_default_profile(&home);
     let profile = home.join(".config/cloister/profile.toml");
 
+    super::seed_software(&home, "codex");
     let output = run(
         &home,
         &project,

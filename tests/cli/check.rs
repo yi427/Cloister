@@ -47,6 +47,29 @@ esac
 "#;
 
 #[test]
+fn accepts_the_container_1_4_nested_server_version() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    fs::create_dir_all(&project).unwrap();
+    write_default_profile(&home);
+    write_runtime(
+        &bin,
+        &HEALTHY_RUNTIME.replace(
+            "\"apiServerVersion\":\"container-apiserver version 1.2.0\"",
+            "\"server\":{\"appName\":\"container-apiserver\",\"version\":\"1.4.1\"}",
+        ),
+    );
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("[PASS] Runtime: container-apiserver version 1.4.1")
+    );
+}
+
+#[test]
 fn reports_a_ready_default_environment_without_writing_state() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
@@ -80,7 +103,7 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
     assert!(stdout.contains(&format!("[PASS] Image: '{RELEASE_IMAGE}' (linux/arm64)")));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
-    assert!(stdout.ends_with("All checks passed.\n"));
+    assert!(stdout.ends_with("All required checks passed; 2 warning(s).\n"));
     assert!(
         !home.join(".local/share/cloister/agents/codex").exists(),
         "check must not create agent state"
@@ -111,7 +134,7 @@ fn rejects_an_official_release_image_that_does_not_match_the_cli() {
     assert!(stdout.contains("[FAIL] Image compatibility: official image version mismatch"));
     assert!(stdout.contains("run 'cloister profile upgrade --dry-run'"));
     assert!(stdout.contains(&format!("[PASS] Image: '{old_image}' (linux/arm64)")));
-    assert!(stdout.ends_with("1 check(s) failed; 0 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 0 skipped.\n"));
 }
 
 #[test]
@@ -135,7 +158,7 @@ fn allows_an_immutable_testing_image_with_a_warning() {
     assert!(stdout.contains("[WARN] Image compatibility: immutable testing image"));
     assert!(stdout.contains(revision));
     assert!(stdout.contains("release compatibility is not guaranteed"));
-    assert!(stdout.ends_with("All required checks passed; 1 warning(s).\n"));
+    assert!(stdout.ends_with("All required checks passed; 3 warning(s).\n"));
 }
 
 #[test]
@@ -355,7 +378,7 @@ fn skips_runtime_dependent_checks_when_container_is_unavailable() {
     assert!(stdout.contains("[FAIL] Runtime: failed to start 'container'"));
     assert!(stdout.contains("[SKIP] Image: runtime is unavailable"));
     assert!(stdout.contains("[SKIP] DNS: runtime is unavailable"));
-    assert!(stdout.ends_with("1 check(s) failed; 2 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 2 skipped.\n"));
 }
 
 #[test]
@@ -395,7 +418,7 @@ esac
     assert!(stdout.contains("[FAIL] Image:"));
     assert!(stdout.contains("image not found"));
     assert!(stdout.contains("[FAIL] DNS: 'host.container.internal' is not configured"));
-    assert!(stdout.ends_with("2 check(s) failed; 0 skipped.\n"));
+    assert!(stdout.ends_with("2 check(s) failed; 2 warning(s); 0 skipped.\n"));
 }
 
 fn write_runtime(bin: &Path, contents: &str) {

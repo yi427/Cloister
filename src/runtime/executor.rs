@@ -13,6 +13,68 @@ use crate::error::message;
 
 use super::CommandSpec;
 
+/// Runs one named container and removes only that container when interrupted.
+/// Installer output is suppressed because npm errors may contain proxy credentials.
+pub async fn execute_managed(
+    command: &CommandSpec,
+    name: &str,
+    cancellation: &tokio_util::sync::CancellationToken,
+    quiet: bool,
+) -> io::Result<ExitStatus> {
+    if cancellation.is_cancelled() {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "container launch interrupted",
+        ));
+    }
+    let mut process = Command::new(command.program());
+    process.args(command.arguments()).kill_on_drop(true);
+    for variable in command.secret_environment() {
+        process.env(&variable.name, variable.value());
+    }
+    if quiet {
+        process
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+    }
+    let mut child = process.spawn()?;
+    let status = tokio::select! {
+        biased;
+        () = cancellation.cancelled() => None,
+        status = child.wait() => Some(status?),
+    };
+    use std::os::unix::process::ExitStatusExt;
+    if let Some(status) = status
+        && !cancellation.is_cancelled()
+        && status.signal().is_none()
+    {
+        return Ok(status);
+    }
+    // Stop the client before deletion, so it cannot create a container afterwards.
+    if child.try_wait()?.is_none() {
+        child.kill().await?;
+    }
+    let cleanup = super::delete_container_command(name);
+    let mut removal = Command::new(cleanup.program());
+    removal
+        .args(cleanup.arguments())
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), removal.status()).await;
+    if !matches!(result, Ok(Ok(status)) if status.success()) {
+        eprintln!(
+            "cloister: warning: could not confirm removal of interrupted container {name}; inspect it with container list --all"
+        );
+    }
+    Err(io::Error::new(
+        io::ErrorKind::Interrupted,
+        "container execution interrupted",
+    ))
+}
+
 /// Executes a runtime command without shell parsing.
 pub async fn execute(command: &CommandSpec) -> Result<ExitStatus, RuntimeExecutionError> {
     let mut process = Command::new(command.program());

@@ -114,7 +114,7 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
         HostExecEnvironmentMode::InheritAll
     );
     assert!(profile.host.exec.allow.is_empty());
-    assert!(profile_source.contains("schema_version = 6"));
+    assert!(profile_source.contains("schema_version = 7"));
     assert!(profile_source.contains("proxy = \"disabled\""));
     assert!(profile_source.contains("[agent]"));
     assert!(profile_source.contains("[host.exec]"));
@@ -150,7 +150,7 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
     ));
     assert!(stdout.contains("[PASS] Profile: 'default'"));
     assert!(stdout.contains(&format!("[PASS] Image: '{RELEASE_IMAGE}' (linux/arm64)")));
-    assert!(stdout.ends_with("All checks passed.\n"));
+    assert!(stdout.ends_with("All required checks passed; 2 warning(s).\n"));
 
     let commands = fs::read_to_string(command_log).expect("command log should be readable");
     assert!(commands.contains("system start"));
@@ -313,7 +313,7 @@ fn can_create_only_the_profile_when_container_is_missing() {
     assert!(stdout.contains("Create the Profile without runtime setup? [y/N]:"));
     assert!(stdout.contains("[PASS] Profile: 'default'"));
     assert!(stdout.contains("[FAIL] Runtime: failed to start 'container'"));
-    assert!(stdout.ends_with("1 check(s) failed; 2 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 2 skipped.\n"));
 }
 
 #[test]

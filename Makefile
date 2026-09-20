@@ -18,6 +18,7 @@ verify: format-check image-check
 
 image-check:
 	sh -n $(IMAGE_SCRIPTS)/entrypoint.sh
+	sh -n $(IMAGE_SCRIPTS)/install-agent.sh
 	test -f skills/host-exec/SKILL.md
 
 image:

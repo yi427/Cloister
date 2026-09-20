@@ -4,7 +4,7 @@ const README: &str = include_str!("../../README.md");
 const RELEASING: &str = include_str!("../../docs/releasing.md");
 const EXAMPLE_PROFILE: &str = include_str!("../../examples/profile.toml");
 const CONTAINERFILE: &str = include_str!("../../images/rust-node/Containerfile");
-const CURRENT_RELEASE_NOTES: &str = include_str!("../../docs/releases/v0.2.0.md");
+const CURRENT_RELEASE_NOTES: &str = include_str!("../../docs/releases/v0.3.0.md");
 const LICENSE_APACHE: &str = include_str!("../../LICENSE-APACHE");
 const LICENSE_MIT: &str = include_str!("../../LICENSE-MIT");
 
@@ -36,13 +36,12 @@ fn release_surfaces_track_the_package_version_and_license() {
 fn release_notes_track_the_guest_toolchain_pins() {
     let node = pin_between("FROM docker.io/library/node:", "-bookworm-slim");
     let rust = pin_after("ARG RUST_VERSION=");
-    let codex = pin_after("ARG CODEX_VERSION=");
-    let claude = pin_after("ARG CLAUDE_CODE_VERSION=");
 
     assert!(CURRENT_RELEASE_NOTES.contains(&format!("| Node.js | {node} |")));
     assert!(CURRENT_RELEASE_NOTES.contains(&format!("| Rust | {rust} |")));
-    assert!(CURRENT_RELEASE_NOTES.contains(&format!("| Codex | {codex} |")));
-    assert!(CURRENT_RELEASE_NOTES.contains(&format!("| Claude Code | {claude} |")));
+    assert!(!CONTAINERFILE.contains("ARG CODEX_VERSION="));
+    assert!(!CONTAINERFILE.contains("ARG CLAUDE_CODE_VERSION="));
+    assert!(!CONTAINERFILE.contains("npm install"));
 }
 
 fn pin_after(prefix: &str) -> &'static str {

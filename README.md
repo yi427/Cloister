@@ -32,6 +32,13 @@ authority inspectable:
 - dry-run plans, read-only readiness checks, and audit metadata expose the
   active boundaries without printing secrets.
 
+> [!NOTE]
+> This branch implements **0.3.0 (unreleased)** with breaking Profile V7 changes.
+> Homebrew still distributes the preceding release. To test this branch, build
+> `make image` and use a new V7 Profile with `image.reference = "cloister:dev"`.
+> The `v0.3.0` tag and matching GHCR image below are release targets, not yet
+> published installation artifacts. V6 Profiles are rejected without migration.
+
 ## Quick start
 
 ### Requirements
@@ -46,7 +53,7 @@ allow Homebrew to install it as a dependency in the next step.
 
 ### Install
 
-Cloister 0.2.x is available from the official Homebrew tap. The Formula builds
+Released Cloister versions are available from the official Homebrew tap. The Formula builds
 Cloister from immutable release source. It does not start the runtime, create a
 Profile, or pull the guest image.
 
@@ -86,17 +93,18 @@ Direct source installation requires Rust 1.97.1 or newer with Cargo:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.2.0 \
+  --tag v0.3.0 \
   cloister
 ```
 
 ### Upgrade
 
-The CLI tag and guest image are one release pair:
+Profile V6 users must create a new V7 Profile; `profile upgrade` does not migrate
+schemas. For current-schema Profiles, the CLI tag and base image are one release pair:
 
 ```text
-CLI:   v0.2.0
-Image: ghcr.io/yi427/cloister:0.2.0
+CLI:   v0.3.0
+Image: ghcr.io/yi427/cloister:0.3.0
 ```
 
 Cloister refuses to start an agent when an official release image does not
@@ -185,14 +193,14 @@ The default path is:
 ${XDG_CONFIG_HOME:-~/.config}/cloister/profile.toml
 ```
 
-An abbreviated Profile V6 looks like this:
+An abbreviated Profile V7 looks like this:
 
 ```toml
-schema_version = 6
+schema_version = 7
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.2.0"
+reference = "ghcr.io/yi427/cloister:0.3.0"
 architecture = "arm64"
 
 [guest]
@@ -208,6 +216,9 @@ proxy = "disabled" # or "inherit"
 
 [agent]
 state = "shared" # or "isolated"
+codex = "latest" # or an exact stable version such as "0.147.0"
+claude = "latest" # or an exact stable version such as "2.1.227"
+update_interval_hours = 24 # 0 checks on every launch
 
 [host.exec]
 enabled = true
@@ -241,6 +252,59 @@ ${XDG_DATA_HOME:-~/.local/share}/cloister/agents/claude
 These directories are owner-only and should be treated as secrets. Cloister
 never substitutes the host's pre-existing agent configuration directories.
 `state = "isolated"` keeps agent state inside the ephemeral container instead.
+
+### Agent installation and updates
+
+On first use, Cloister downloads only the selected Agent from the official npm
+registry (`@openai/codex` or `@anthropic-ai/claude-code`). Software is stored
+separately from login/configuration/session state:
+
+```text
+${XDG_DATA_HOME:-~/.local/share}/cloister/software/linux-arm64/<agent>/
+```
+
+A dedicated preparation container receives only a writable staging directory
+and the Profile-selected proxy. It receives no workspace, Agent state, or Host
+MCP token. npm verifies package integrity during installation; the helper runs
+`--version` before committing an installation. npm diagnostics are suppressed
+because they can contain proxy credentials. Failures report the phase without
+printing package-manager output.
+
+Cloister checks `latest` at the configured interval (24 hours by default),
+serializes installation across processes, and atomically publishes a complete
+version. Sessions mount only their selected installation, read-only. Updating
+software does not replace files used by an existing session. Agent self-updates
+are not the update authority; use Cloister's controls:
+
+```sh
+cloister codex --update-agent
+cloister claude --update-agent
+cloister codex --agent-version 0.147.0
+cloister codex --offline
+```
+
+An exact version is reused without automatic updates. `--agent-version` applies
+only to that invocation; editing the Profile pins it persistently. Older cached
+versions can be selected this way for rollback. Installation caches are tied to
+the selected base-image reference. Custom mutable image tags are not a content
+identity; force a software check after rebuilding a custom image.
+
+A failed automatic download/check warns and reuses an existing installation.
+First installation, an unavailable exact version, or an explicit `--update-agent`
+failure stops launch. Invalid metadata fails closed. `--offline` affects software
+preparation only; it does **not** block the Agent's network access. It requires
+an already-installed matching image/version. `--dry-run` and `check` never
+install or update software. `state = "isolated"` still reuses program files while
+keeping login/configuration/history ephemeral.
+
+Writable workspace/state mounts that overlap the shared software cache are
+rejected, including aliases through symbolic links.
+
+Old software directories are retained because other sessions may still use them.
+There is no automatic garbage collection. SIGINT, SIGTERM, and SIGHUP initiate
+cleanup of the named container and Host bridge. If runtime removal cannot be
+confirmed, Cloister reports the specific container to inspect. SIGKILL, machine
+failure, and runtime failure can leave resources requiring manual cleanup.
 
 ### Network and proxy policy
 
@@ -293,8 +357,12 @@ cloister codex --no-host-bridge
 cloister claude --no-host-bridge
 ```
 
-The default bridge port is `17834`. Use `--host-bridge-port <PORT>` when another
-Cloister process already owns that port.
+Each launch binds a separate loopback bridge on a port allocated by the OS.
+Use `--host-bridge-port <PORT>` to request a specific port; a collision fails
+instead of selecting a different port silently. `--dry-run` displays `:0` as
+an unresolved automatic-port placeholder. Each session has its own token,
+Host Exec records, and fixed workspace. Shared Agent state still follows the
+Profile's cross-project sharing policy.
 
 ### DNS requirement
 
@@ -352,7 +420,10 @@ Common agent options:
 --workspace <DIRECTORY>  mount another project at /workspace
 --dry-run                print the runtime plan without starting an agent
 --no-host-bridge         reduce authority for one invocation
---host-bridge-port <N>   select another loopback bridge port
+--host-bridge-port <N>   select a loopback bridge port (default 0: automatic)
+--agent-version <V>      latest or an exact stable version for this invocation
+--update-agent           check/install now; failure prevents launch
+--offline                reuse installed software without downloading or checking
 -- <ARGUMENTS>           pass remaining arguments directly to the agent
 ```
 
@@ -384,18 +455,22 @@ Profile state. Both normal execution and `--dry-run` agent plans fail before
 workspace, bridge, or container side effects when an official release pair is
 incompatible.
 
-The Linux ARM64 image contains pinned Node.js, Rust, Codex, and Claude Code
-versions, plus Git, build tools, `ripgrep`, and `bubblewrap`. It runs as the
-non-root `cloister` user and contains the canonical Host Exec skill and project
-licenses. Exact versions are maintained in
-[`images/rust-node/Containerfile`](images/rust-node/Containerfile).
+The Linux ARM64 base image contains pinned Node.js and Rust, plus Git, build
+tools, `ripgrep`, and `bubblewrap`. It contains no Codex or Claude Code package.
+It runs as the non-root `cloister` user and contains the canonical Host Exec
+skill, installer helper, and project licenses. Base tool versions are maintained
+in [`images/rust-node/Containerfile`](images/rust-node/Containerfile).
+
+CLI/image pairing covers Cloister's base runtime and integration files. Agent
+versions evolve independently: matching CLI/image versions do not certify
+compatibility with every future Agent release.
 
 See [`docs/releasing.md`](docs/releasing.md) for the release gates and tag
 policy.
 
 ## Limitations
 
-Cloister 0.2.x intentionally does not provide:
+Cloister 0.3 intentionally does not provide:
 
 - Intel Mac, Linux-host, Docker, or general-purpose container-runtime support;
 - a GUI, prebuilt standalone CLI binary, or transparent bidirectional file
@@ -404,7 +479,7 @@ Cloister 0.2.x intentionally does not provide:
 - argument-level Host Exec restrictions beyond `arguments = "any"`;
 - host-level CPU, memory, filesystem, or network containment for Host Exec;
 - restoration of running Host Exec jobs after Cloister exits; or
-- automatic selection of an unused Host MCP port.
+- automatic cleanup of cached Agent software versions.
 
 ## Development
 
