@@ -3,7 +3,7 @@ schema_version = 7
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.3.0"
+reference = "ghcr.io/yi427/cloister:0.3.1"
 architecture = "arm64"
 
 [guest]

@@ -23,8 +23,8 @@ CLI version:
 ghcr.io/yi427/cloister:<CARGO_PKG_VERSION>
 ```
 
-For example, Cloister CLI `0.3.0` selects
-`ghcr.io/yi427/cloister:0.3.0`.
+For example, Cloister CLI `0.3.1` selects
+`ghcr.io/yi427/cloister:0.3.1`.
 
 The CLI enforces this pair for official release images. An older or newer
 official `X.Y.Z` image fails closed before agent startup, including `--dry-run`
@@ -33,16 +33,15 @@ plans.
 ## Choosing a release version
 
 Use a patch release for a focused bug fix that keeps the Profile contract
-compatible, such as the project workspace-path fix planned for `0.3.1`.
+compatible, such as the project workspace-path fix in `0.3.1`.
 Profile `schema_version` remains `7` for that fix. Update the CLI version,
 lockfile, exact image reference, and release documentation together during
 release preparation; a development fix does not require an immediate version
 bump. Never replace the already published `v0.3.0` tag or `0.3.0` image.
 
 The latest published release is
-[0.3.0](https://github.com/yi427/Cloister/releases/tag/v0.3.0).
-[0.3.1 notes](releases/v0.3.1.md) describe pending changes, not available
-installation artifacts.
+[0.3.1](https://github.com/yi427/Cloister/releases/tag/v0.3.1).
+See the [0.3.1 notes](releases/v0.3.1.md) for changes and upgrade instructions.
 
 ## CLI distribution boundary
 
@@ -60,7 +59,7 @@ Direct installation from the exact Git tag remains supported:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.3.0 \
+  --tag v0.3.1 \
   cloister
 ```
 
@@ -155,7 +154,7 @@ Before creating a release tag, all of the following must be true:
     archive and SHA-256, then audit, install from source, and test the Formula
     before publishing it.
 
-Example for the planned `0.3.1` patch release, after all gates pass:
+Example for the `0.3.1` patch release, after all gates pass:
 
 ```sh
 git tag -a v0.3.1 -m "Release Cloister 0.3.1"
@@ -189,26 +188,25 @@ Existing backups are never overwritten. Immutable testing images, custom
 images, future releases, moving official tags, symlinks, and incompatible
 Profile schemas require manual review instead of automatic conversion.
 
-## 0.3.0 checklist
+## 0.3.1 checklist
 
-This is the preparation checklist retained for the `0.3.0` release, not a live
-publication-status tracker. That version was published on 2026-10-10; its
-[release validation record](releases/v0.3.0.md#release-validation-on-2026-10-10)
-reports completed checks and coverage limits. Copy and update this checklist
+This checklist is a preparation template, not a live publication-status
+tracker. The [GitHub release](https://github.com/yi427/Cloister/releases/tag/v0.3.1)
+records completed checks and coverage limits. Copy and update the template
 for a future release, and keep its results separate from development testing.
 
 - [ ] MIT OR Apache-2.0 licensing files and Cargo metadata are present.
 - [ ] `Cargo.toml`, `Cargo.lock`, `cloister --version`, the example Profile, and
-  the default `init` image all resolve to `0.3.0`.
+  the default `init` image all resolve to `0.3.1`.
 - [ ] Local `make verify` passes.
 - [ ] The release commit is pushed and GitHub `Verify` passes.
 - [ ] `main` and `origin/main` identify the same release commit.
-- [ ] Annotated tag `v0.3.0` is created from that commit and pushed once.
-- [ ] Image tags `0.3.0`, `0.3`, and `sha-<release-commit>` exist.
-- [ ] Anonymous GHCR access returns a Linux ARM64 manifest for `0.3.0`.
-- [ ] Source installation from `v0.3.0` succeeds with `--locked`.
+- [ ] Annotated tag `v0.3.1` is created from that commit and pushed once.
+- [ ] Image tags `0.3.1`, `0.3`, and `sha-<release-commit>` exist.
+- [ ] Anonymous GHCR access returns a Linux ARM64 manifest for `0.3.1`.
+- [ ] Source installation from `v0.3.1` succeeds with `--locked`.
 - [ ] `init`, `check`, Codex, Claude, Host Exec, cancellation, and audit smoke
-  tests pass against `ghcr.io/yi427/cloister:0.3.0`.
+  tests pass against `ghcr.io/yi427/cloister:0.3.1`.
 - [ ] A GitHub Release is created with source archives and no binary assets.
 - [ ] The official Homebrew Formula points at the exact release archive and
   passes audit, source installation, and `brew test`.

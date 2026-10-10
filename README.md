@@ -33,12 +33,10 @@ authority inspectable:
   active boundaries without printing secrets.
 
 > [!NOTE]
-> [0.3.0 is released](https://github.com/yi427/Cloister/releases/tag/v0.3.0)
-> and available through Homebrew. It uses Profile V7; older schemas require a
-> new Profile. This checkout also includes the project-specific workspace fix
-> planned for [0.3.1](docs/releases/v0.3.1.md), which is not yet released.
-> To test the current source, build `make image` and use a V7 Profile with
-> `image.reference = "cloister:dev"`; see [Development](#development).
+> [0.3.1](https://github.com/yi427/Cloister/releases/tag/v0.3.1) includes the
+> project-specific workspace fix and uses Profile V7. Existing V7 Profiles can
+> update their image with `cloister profile upgrade`; older schemas require a
+> new Profile. See the [release notes](docs/releases/v0.3.1.md).
 
 ## Quick start
 
@@ -83,12 +81,11 @@ cloister codex
 # or: cloister claude
 ```
 
-In the current source, the directory is mounted at its canonical host path
+The directory is mounted at its canonical host path
 under `/workspace`; for example, `/Volumes/Projects/app` becomes
 `/workspace/Volumes/Projects/app`.
 The agent starts in that project directory. Select another directory for one
-invocation with `--workspace`. Released 0.3.0 still mounts projects at
-`/workspace`; the project-specific paths are part of the upcoming 0.3.1 fix.
+invocation with `--workspace`.
 
 ### Install from the exact Git tag
 
@@ -97,7 +94,7 @@ Direct source installation requires Rust 1.97.1 or newer with Cargo:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.3.0 \
+  --tag v0.3.1 \
   cloister
 ```
 
@@ -107,8 +104,8 @@ Profile V6 users must create a new V7 Profile; `profile upgrade` does not migrat
 schemas. For current-schema Profiles, the CLI tag and base image are one release pair:
 
 ```text
-CLI:   v0.3.0
-Image: ghcr.io/yi427/cloister:0.3.0
+CLI:   v0.3.1
+Image: ghcr.io/yi427/cloister:0.3.1
 ```
 
 Cloister refuses to start an agent when an official release image does not
@@ -204,7 +201,7 @@ schema_version = 7
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.3.0"
+reference = "ghcr.io/yi427/cloister:0.3.1"
 architecture = "arm64"
 
 [guest]
@@ -257,7 +254,7 @@ These directories are owner-only and should be treated as secrets. Cloister
 never substitutes the host's pre-existing agent configuration directories.
 `state = "isolated"` keeps agent state inside the ephemeral container instead.
 
-The upcoming 0.3.1 fix gives each canonical host workspace a distinct, stable
+Cloister 0.3.1 gives each canonical host workspace a distinct, stable
 guest working directory, including projects with the same directory name.
 Repeated launches and symbolic links to the same host directory use the same
 guest path. This lets agents apply
