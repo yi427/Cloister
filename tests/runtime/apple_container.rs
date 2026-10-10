@@ -2,12 +2,12 @@ use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
     fs,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
 };
 
 use cloister::{
-    agent::{ClaudeAgent, CodexAgent},
+    agent::{AgentAdapter, ClaudeAgent, CodexAgent},
     preflight::{resolve_guest_proxy, resolve_launch},
     profile::{AgentState, NetworkProxyMode, load_profile},
     runtime::{
@@ -151,7 +151,10 @@ fn translates_every_supported_codex_setting() {
     assert_eq!(argument_after(arguments, "--cpus"), "4");
     assert_eq!(argument_after(arguments, "--memory"), "8G");
     assert_eq!(argument_after(arguments, "--user"), "cloister");
-    assert_eq!(argument_after(arguments, "--workdir"), "/workspace");
+    assert_eq!(
+        argument_after(arguments, "--workdir"),
+        plan.workspace().guest()
+    );
     assert_eq!(argument_after(arguments, "--network"), "default");
     assert_eq!(
         argument_after(arguments, "--label"),
@@ -198,11 +201,111 @@ fn creates_the_read_write_workspace_mount() {
         .into_owned();
 
     assert!(mount.starts_with("type=bind,source="));
-    assert!(mount.contains(",target=/workspace"));
+    let host = fixture("valid").canonicalize().unwrap();
+    let guest = Path::new("/workspace").join(host.strip_prefix("/").unwrap());
+    assert_eq!(plan.workspace().guest(), guest);
+    assert_eq!(
+        mount,
+        format!(
+            "type=bind,source={},target={}",
+            host.display(),
+            guest.display()
+        )
+    );
     assert!(!mount.ends_with(",readonly"));
     assert_eq!(
         plan.workspace().host(),
         fixture("valid").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn namesake_projects_have_distinct_workdirs_with_shared_state_for_both_agents() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let first = directory.path().join("first/project");
+    let second = directory.path().join("second/project");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    let mut profile = load_profile(fixture("valid/default.toml")).unwrap();
+    profile.agent.state = AgentState::Shared;
+    let first = resolve_launch(profile.clone(), first).unwrap();
+    let second = resolve_launch(profile, second).unwrap();
+    let state = directory.path().join("state");
+
+    for agent in [&CodexAgent as &dyn AgentAdapter, &ClaudeAgent] {
+        let first_plan =
+            plan_agent_container(&first, agent, Some(&state), None, None, &[]).unwrap();
+        let second_plan =
+            plan_agent_container(&second, agent, Some(&state), None, None, &[]).unwrap();
+
+        assert_ne!(
+            first_plan.workspace().guest(),
+            second_plan.workspace().guest()
+        );
+        assert_eq!(first_plan.agent_state(), second_plan.agent_state());
+        for plan in [&first_plan, &second_plan] {
+            assert_eq!(
+                argument_after(plan.command().arguments(), "--workdir"),
+                plan.workspace().guest()
+            );
+            assert_eq!(
+                plan.workspace().guest().file_name(),
+                Some(OsStr::new("project"))
+            );
+            assert_eq!(
+                argument_after(plan.command().arguments(), "--mount"),
+                OsString::from(format!(
+                    "type=bind,source={},target={}",
+                    plan.workspace().host().display(),
+                    plan.workspace().guest().display()
+                ))
+            );
+        }
+    }
+}
+
+#[test]
+fn repeated_launches_and_workspace_aliases_keep_the_same_guest_workdir() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let project = directory.path().join("project");
+    let alias = directory.path().join("alias");
+    fs::create_dir(&project).unwrap();
+    symlink(&project, &alias).unwrap();
+    let profile = load_profile(fixture("valid/default.toml")).unwrap();
+    let resolved = resolve_launch(profile.clone(), &project).unwrap();
+    let expected = plan_agent_container(&resolved, &CodexAgent, None, None, None, &[]).unwrap();
+
+    for workspace in [&project, &project.join("."), &alias] {
+        let resolved = resolve_launch(profile.clone(), workspace).unwrap();
+        let actual = plan_agent_container(&resolved, &CodexAgent, None, None, None, &[]).unwrap();
+        assert_eq!(actual.workspace(), expected.workspace());
+        assert_eq!(actual.command(), expected.command());
+    }
+}
+
+#[test]
+fn preserves_unicode_spaces_and_shell_metacharacters_in_workspace_arguments() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let project = directory.path().join("项目 with spaces-$literal");
+    fs::create_dir(&project).unwrap();
+    let profile = load_profile(fixture("valid/default.toml")).unwrap();
+    let resolved = resolve_launch(profile, &project).unwrap();
+    let plan = plan_agent_container(&resolved, &CodexAgent, None, None, None, &[]).unwrap();
+    let mut expected_guest = OsString::from("/workspace");
+    expected_guest.push(resolved.workspace());
+    assert_eq!(plan.workspace().guest(), Path::new(&expected_guest));
+    assert_eq!(
+        argument_after(plan.command().arguments(), "--workdir"),
+        expected_guest
+    );
+
+    let mut expected_mount = OsString::from("type=bind,source=");
+    expected_mount.push(resolved.workspace());
+    expected_mount.push(",target=");
+    expected_mount.push(expected_guest);
+    assert_eq!(
+        argument_after(plan.command().arguments(), "--mount"),
+        expected_mount
     );
 }
 

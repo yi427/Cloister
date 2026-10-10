@@ -4,6 +4,15 @@
 - Date: 2026-08-11
 - Updates: ADR 0004
 
+## Later amendments
+
+[ADR 0008](0008-independent-agent-software-and-concurrent-sessions.md) introduces
+Profile V7 and independent Agent updates.
+[ADR 0009](0009-project-specific-workspace-paths.md) replaces the common
+`/workspace` mount target. The Guest/Host routing rules below now apply to the
+selected project directory under `/workspace`, as described by the canonical
+`host-exec` Skill. The original decision remains below as history.
+
 ## Context
 
 ADR 0004 defines Host Exec as an explicit bridge from the Linux Guest to

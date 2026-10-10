@@ -23,7 +23,7 @@ use super::plan::{
 };
 
 const HOST_BRIDGE_TOKEN_ENVIRONMENT: &str = "CLOISTER_HOST_BRIDGE_TOKEN";
-const WORKSPACE_GUEST_PATH: &str = "/workspace";
+const WORKSPACE_GUEST_ROOT: &str = "/workspace";
 
 /// Executable used for the Apple container runtime.
 pub const APPLE_CONTAINER_PROGRAM: &str = "container";
@@ -139,7 +139,14 @@ pub fn plan_agent_container(
 
     let workspace = WorkspaceMount {
         host: resolved.workspace().to_owned(),
-        guest: WORKSPACE_GUEST_PATH.into(),
+        // Keep each canonical host project at a stable, distinct guest cwd so
+        // agents can filter shared session history by project, including namesakes.
+        guest: Path::new(WORKSPACE_GUEST_ROOT).join(
+            resolved
+                .workspace()
+                .strip_prefix("/")
+                .expect("resolved host workspace should be absolute"),
+        ),
     };
     let agent_state = match resolved.profile().agent.state {
         AgentState::Isolated => None,

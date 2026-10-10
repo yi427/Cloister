@@ -4,6 +4,14 @@
 - Date: 2026-08-11
 - Updates: ADR 0001 and ADR 0003
 
+## Later amendments
+
+[ADR 0008](0008-independent-agent-software-and-concurrent-sessions.md) replaces
+bundled Agent versions with independently installed packages and defines
+Profile V7. Exact CLI/base-image pairing remains in force; it covers Cloister
+integration, not a fixed Codex or Claude version. References below to Profile V6
+and pinned Agents describe the original decision.
+
 ## Context
 
 Cloister releases the macOS CLI and Linux ARM64 Guest image as one tested

@@ -79,6 +79,12 @@ fn dry_run_uses_separate_claude_state_and_transient_host_bridge_config() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
+    let canonical_project = project.canonicalize().expect("project should resolve");
+    assert!(stdout.contains(&format!(
+        "Workspace: {} -> /workspace{} (read-write)",
+        canonical_project.display(),
+        canonical_project.display()
+    )));
     assert!(stdout.contains(&format!(
         "Claude state: {} -> /cloister/agents/claude (shared across projects)",
         state.display()

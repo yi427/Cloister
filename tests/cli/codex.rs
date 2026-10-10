@@ -109,7 +109,8 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("Profile: default"));
     assert!(stdout.contains("Guest proxy: disabled"));
     assert!(stdout.contains(&format!(
-        "Workspace: {} -> /workspace (read-write)",
+        "Workspace: {} -> /workspace{} (read-write)",
+        canonical_project.display(),
         canonical_project.display()
     )));
     assert!(stdout.contains(&format!(
@@ -548,9 +549,66 @@ fn explicit_workspace_overrides_the_current_directory() {
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(stdout.contains(&format!(
-        "Workspace: {} -> /workspace (read-write)",
+        "Workspace: {} -> /workspace{} (read-write)",
+        selected.canonicalize().unwrap().display(),
         selected.canonicalize().unwrap().display()
     )));
+}
+
+#[test]
+fn resume_launches_use_distinct_stable_project_paths_and_keep_shared_agent_state() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let home = directory.path().join("home");
+    let first = directory.path().join("first/project");
+    let second = directory.path().join("second/project");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    write_default_profile(&home);
+
+    for (agent, resume_argument) in [("codex", "resume"), ("claude", "--resume")] {
+        let outputs = [&first, &second, &first].map(|project| {
+            let output = run(
+                &home,
+                project,
+                None,
+                &[agent, "--dry-run", "--", resume_argument],
+            );
+            assert!(output.status.success());
+            assert!(output.stderr.is_empty());
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let canonical = project.canonicalize().unwrap();
+            let guest = format!("/workspace{}", canonical.display());
+            assert!(stdout.contains(&format!(
+                "Workspace: {} -> {guest} (read-write)",
+                canonical.display()
+            )));
+            assert!(
+                stdout.contains(&format!("{guest:?}")),
+                "runtime must use the project path as its workdir"
+            );
+            assert!(
+                stdout.ends_with(&format!("{resume_argument:?}\n")),
+                "resume arguments must be forwarded"
+            );
+            stdout
+        });
+
+        let workspace_line = |index: usize| {
+            outputs[index]
+                .lines()
+                .find(|line| line.starts_with("Workspace: "))
+                .unwrap()
+        };
+        let state_line = |index: usize| {
+            outputs[index]
+                .lines()
+                .find(|line| line.contains(" state: "))
+                .unwrap()
+        };
+        assert_ne!(workspace_line(0), workspace_line(1));
+        assert_eq!(outputs[0], outputs[2]);
+        assert_eq!(state_line(0), state_line(1));
+    }
 }
 
 #[test]

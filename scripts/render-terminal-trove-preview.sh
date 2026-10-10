@@ -26,6 +26,7 @@ mkdir -p "$demo_root/project"
     cd "$repo_root"
     cargo build --quiet
 )
+cloister_version="$("$repo_root/target/debug/cloister" --version)"
 
 dry_run_output="$(
     cd "$repo_root"
@@ -64,7 +65,7 @@ while IFS= read -r line; do
             preview_lines+=("  host.exec_status, host.exec_cancel (Profile-governed; macOS user permissions)")
             ;;
         "Workspace:"*)
-            preview_lines+=("Workspace: ~/demo -> /workspace (read-write)")
+            preview_lines+=("Workspace: ~/demo -> /workspace/Users/demo/demo (read-write)")
             ;;
     esac
 done <<<"$dry_run_output"
@@ -124,7 +125,7 @@ render_frame() {
         -fill "#f5c451" -draw "circle 88,59 95,59"
         -fill "#62d394" -draw "circle 114,59 121,59"
         -font "$font_path" -pointsize 18 -fill "$muted" -gravity NorthWest
-        -annotate +598+49 "cloister 0.2.0  ·  dry-run"
+        -annotate +598+49 "$cloister_version  ·  dev dry-run"
         -pointsize 17 -fill "$accent"
         -annotate +982+49 "PROFILE-GOVERNED AI AGENTS"
         -pointsize 23 -fill "$accent"
@@ -227,15 +228,16 @@ magick \
     -stroke none -pointsize 22 -fill "$social_text" \
     -annotate +552+201 "${preview_lines[2]}" \
     -fill "$gold" \
-    -annotate +552+249 "${preview_lines[5]}" \
+    -annotate +552+249 "Workspace: ~/demo ->" \
+    -annotate +578+282 "/workspace/Users/demo/demo (read-write)" \
     -fill "$green" \
-    -annotate +552+297 "${preview_lines[7]}" \
-    -annotate +552+345 "Host bridge token: ephemeral, forwarded," \
-    -annotate +552+383 "  and redacted" \
+    -annotate +552+326 "${preview_lines[7]}" \
+    -annotate +552+365 "Host bridge token: ephemeral, forwarded," \
+    -annotate +552+398 "  and redacted" \
     -fill "$accent" \
-    -annotate +552+431 "${preview_lines[14]}" \
+    -annotate +552+443 "${preview_lines[14]}" \
     -fill "$social_text" \
-    -annotate +552+479 "${preview_lines[15]}" \
+    -annotate +552+487 "${preview_lines[15]}" \
     -pointsize 18 -fill "$social_muted" \
     -annotate +552+535 "profile-governed · reviewable · fail-closed" \
     -depth 8 -strip \

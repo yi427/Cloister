@@ -82,6 +82,25 @@ the current development build tested successfully and accepted it. This is a
 user-reported acceptance result; exact Agent versions and per-check output were
 not recorded in this confirmation.
 
+## Published 0.3.0 validation on 2026-10-10
+
+The published
+[release record](https://github.com/yi427/Cloister/releases/tag/v0.3.0)
+documents checks against the exact release image, separately from the earlier
+development-image checks above. The release commit is
+`f883ea1901188dfad0bf9610e07321907c5b23f4`; the image digest is
+`sha256:bf2528421b37aaf89863a76576b0a4375e8841c3549a99481d5cbe07733ff02d`.
+
+The recorded checks include local `make verify` (212 tests and Clippy), GitHub
+CI, anonymous Linux ARM64 image access, source installation, Homebrew source
+installation/audit/test, base tool versions, Agent first-use and cached/offline
+launches, exact-version selection, an explicit update check, concurrent Codex
+launches with distinct bridge ports, and readiness including actual host
+connectivity. Those launches installed Codex 0.162.1 and Claude Code 2.1.296.
+
+No authenticated model tasks were performed in these release smoke checks.
+These recorded versions do not certify later independently installed Agents.
+
 ## Coverage limits
 
 Version output does not prove authenticated coding, skill selection, MCP
