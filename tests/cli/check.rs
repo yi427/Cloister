@@ -70,6 +70,33 @@ fn accepts_the_container_1_4_nested_server_version() {
 }
 
 #[test]
+fn accepts_the_container_1_5_pf_anchor_and_reports_its_runtime_inspection_path() {
+    for mode in ["ready", "fail"] {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let bin = directory.path().join("bin");
+        write_default_profile(&home);
+        write_runtime(&bin, HEALTHY_RUNTIME);
+        let output = run_with_environment(
+            &home,
+            directory.path(),
+            Some(&bin),
+            &["check"],
+            &[("TEST_PF_CONFIG", "nested"), ("TEST_PROBE_MODE", mode)],
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("[PASS] PF configuration:"), "{stdout}");
+        if mode == "ready" {
+            assert!(output.status.success(), "{stdout}");
+            assert!(stdout.contains("[PASS] Host connectivity:"));
+        } else {
+            assert_eq!(output.status.code(), Some(1), "{stdout}");
+            assert!(stdout.contains("sudo pfctl -a com.apple/container -s nat"));
+        }
+    }
+}
+
+#[test]
 fn reports_a_ready_default_environment_without_writing_state() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");

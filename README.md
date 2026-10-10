@@ -381,9 +381,13 @@ removed on restart. `cloister check` reports when the mapping is absent.
 
 When Host Exec or an inherited loopback proxy needs host forwarding, `check`
 also parses `/etc/pf.conf` with `pfctl -n -v -f` (no rules are loaded). It fails
-if the expanded configuration lacks the `com.apple.container` redirect anchor
-or the expected `203.0.113.113 -> 127.0.0.1` rule. A leftover rule file without
-a reference in the main configuration is not enough.
+if the expanded configuration lacks a recognized container redirect anchor
+or the expected `203.0.113.113 -> 127.0.0.1` rule. Both the earlier
+`com.apple.container` anchor and Apple container 1.5's `com.apple/container`
+anchor under the Apple wildcard are recognized. For nested anchors, the check
+also inspects the verbose load diagnostics, since `pfctl` prints relative
+wildcard names in the expanded rules. A leftover rule file without a reference
+in the main configuration is not enough.
 
 The check then starts a temporary loopback HTTP listener and a one-shot container
 using the already-available Profile image. The container sends a direct request

@@ -75,6 +75,13 @@ allows eight seconds for DNS/connect and ten seconds for the request, within a
 twenty-second overall deadline. Deterministic tests cover failed requests,
 false-success exits, mismatched probe paths, timeout, and signal cleanup.
 
+## User confirmation on 2026-10-10
+
+After the Apple container 1.5 PF-anchor recognition fix, the user reported that
+the current development build tested successfully and accepted it. This is a
+user-reported acceptance result; exact Agent versions and per-check output were
+not recorded in this confirmation.
+
 ## Remaining release acceptance
 
 Version output does not prove authenticated coding, skill selection, MCP

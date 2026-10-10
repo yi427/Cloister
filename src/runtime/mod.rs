@@ -13,7 +13,7 @@ pub use apple_container::{
     system_status_command,
 };
 pub use executor::{RuntimeExecutionError, execute, execute_managed, execute_output};
-pub use packet_filter::{HOST_PF_ANCHOR, pf_configuration_command};
+pub use packet_filter::{HOST_PF_ANCHOR, HOST_PF_NESTED_ANCHOR, pf_configuration_command};
 pub use plan::{
     AgentStateMount, CommandSpec, GuestProxyPlan, HostCommandPlan, NetworkExposure, RuntimePlan,
     WorkspaceMount,

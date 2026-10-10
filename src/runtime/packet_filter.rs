@@ -3,6 +3,7 @@
 use super::CommandSpec;
 
 pub const HOST_PF_ANCHOR: &str = "com.apple.container";
+pub const HOST_PF_NESTED_ANCHOR: &str = "com.apple/container";
 
 fn pfctl(arguments: &[&str]) -> CommandSpec {
     CommandSpec {
