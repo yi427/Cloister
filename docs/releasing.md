@@ -80,6 +80,10 @@ an exact `X.Y.Z` release, never `main` or the moving `X.Y` channel. Published
 `X.Y.Z` and `sha-<full-commit>` tags must never be moved or overwritten; fix a
 bad image by publishing a new patch release.
 
+The `main` build publishes `sha-<full-commit>`. A release-tag build publishes
+only the semantic-version tags so its release metadata does not overwrite the
+existing SHA image from that commit.
+
 At runtime, a full `sha-<40-hex>` tag is accepted as an immutable testing image
 with a warning. Official moving tags (`main`, `latest`, and `X.Y`) are rejected.
 Local and third-party image references remain available for development with
