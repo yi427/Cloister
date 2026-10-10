@@ -48,7 +48,7 @@ pub(super) struct AgentArgs {
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
     profile: Option<PathBuf>,
 
-    /// Host project directory mounted at /workspace.
+    /// Host project directory mounted at its canonical path under /workspace.
     ///
     /// Defaults to the current directory.
     #[arg(long, value_name = "DIRECTORY", value_hint = ValueHint::DirPath)]

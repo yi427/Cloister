@@ -30,6 +30,20 @@ The CLI enforces this pair for official release images. An older or newer
 official `X.Y.Z` image fails closed before agent startup, including `--dry-run`
 plans.
 
+## Choosing a release version
+
+Use a patch release for a focused bug fix that keeps the Profile contract
+compatible, such as the project workspace-path fix planned for `0.3.1`.
+Profile `schema_version` remains `7` for that fix. Update the CLI version,
+lockfile, exact image reference, and release documentation together during
+release preparation; a development fix does not require an immediate version
+bump. Never replace the already published `v0.3.0` tag or `0.3.0` image.
+
+The latest published release is
+[0.3.0](https://github.com/yi427/Cloister/releases/tag/v0.3.0).
+[0.3.1 notes](releases/v0.3.1.md) describe pending changes, not available
+installation artifacts.
+
 ## CLI distribution boundary
 
 The 0.3.x CLI is distributed through the official `yi427/tap` Homebrew tap.
@@ -126,10 +140,11 @@ Before creating a release tag, all of the following must be true:
 7. Confirm that the moving `main` image represents the intended release image
    inputs.
 8. Create and push an annotated `vX.Y.Z` Git tag.
-9. Confirm that GitHub Actions published `X.Y.Z`, `X.Y`, and the immutable
-   `sha-<full-commit>` image tags, then verify the exact image through Apple
-   `container` before distributing that CLI release. Its `init` default already
-   points at the matching exact version.
+9. Confirm that the release-tag workflow published `X.Y.Z` and `X.Y`, and that
+   the `main` build's existing `sha-<full-commit>` image remains unchanged.
+   Verify the exact release image through Apple `container` before distributing
+   that CLI release. Its `init` default already points at the matching exact
+   version.
 10. Test the documented `cargo install --locked --git ... --tag vX.Y.Z`
     command from a clean temporary Cargo root.
 11. Run `cloister init`, `cloister check`, and one Codex and Claude smoke test
@@ -140,11 +155,11 @@ Before creating a release tag, all of the following must be true:
     archive and SHA-256, then audit, install from source, and test the Formula
     before publishing it.
 
-Example for version `0.3.0`:
+Example for the planned `0.3.1` patch release, after all gates pass:
 
 ```sh
-git tag -a v0.3.0 -m "Release Cloister 0.3.0"
-git push origin v0.3.0
+git tag -a v0.3.1 -m "Release Cloister 0.3.1"
+git push origin v0.3.1
 ```
 
 The publish workflow rejects a release tag whose version does not exactly
@@ -175,6 +190,12 @@ images, future releases, moving official tags, symlinks, and incompatible
 Profile schemas require manual review instead of automatic conversion.
 
 ## 0.3.0 checklist
+
+This is the preparation checklist retained for the `0.3.0` release, not a live
+publication-status tracker. That version was published on 2026-10-10; its
+[release validation record](releases/v0.3.0.md#release-validation-on-2026-10-10)
+reports completed checks and coverage limits. Copy and update this checklist
+for a future release, and keep its results separate from development testing.
 
 - [ ] MIT OR Apache-2.0 licensing files and Cargo metadata are present.
 - [ ] `Cargo.toml`, `Cargo.lock`, `cloister --version`, the example Profile, and

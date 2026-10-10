@@ -33,11 +33,12 @@ authority inspectable:
   active boundaries without printing secrets.
 
 > [!NOTE]
-> This branch implements **0.3.0 (unreleased)** with breaking Profile V7 changes.
-> Homebrew still distributes the preceding release. To test this branch, build
-> `make image` and use a new V7 Profile with `image.reference = "cloister:dev"`.
-> The `v0.3.0` tag and matching GHCR image below are release targets, not yet
-> published installation artifacts. V6 Profiles are rejected without migration.
+> [0.3.0 is released](https://github.com/yi427/Cloister/releases/tag/v0.3.0)
+> and available through Homebrew. It uses Profile V7; older schemas require a
+> new Profile. This checkout also includes the project-specific workspace fix
+> planned for [0.3.1](docs/releases/v0.3.1.md), which is not yet released.
+> To test the current source, build `make image` and use a V7 Profile with
+> `image.reference = "cloister:dev"`; see [Development](#development).
 
 ## Quick start
 
@@ -72,8 +73,7 @@ cloister init
 DNS mapping. Existing files, directories, and symbolic links at the Profile
 path are never overwritten.
 
-Verify the complete environment without changing it, then launch an agent in a
-project:
+Check configuration and runtime readiness, then launch an agent in a project:
 
 ```sh
 cloister check
@@ -83,8 +83,12 @@ cloister codex
 # or: cloister claude
 ```
 
-The current directory is mounted at `/workspace`. Select another directory for
-one invocation with `--workspace`.
+In the current source, the directory is mounted at its canonical host path
+under `/workspace`; for example, `/Volumes/Projects/app` becomes
+`/workspace/Volumes/Projects/app`.
+The agent starts in that project directory. Select another directory for one
+invocation with `--workspace`. Released 0.3.0 still mounts projects at
+`/workspace`; the project-specific paths are part of the upcoming 0.3.1 fix.
 
 ### Install from the exact Git tag
 
@@ -126,7 +130,7 @@ pulls an image during `--dry-run`.
 | Boundary | Cloister behavior |
 | --- | --- |
 | Guest root filesystem | Read-only, with an ephemeral container removed after the agent exits. |
-| Workspace | One explicitly selected host directory mounted live at `/workspace` as read-write. |
+| Workspace | One explicitly selected host directory mounted live at its canonical path under `/workspace` as read-write. |
 | Agent credentials and state | Existing host `~/.codex` and `~/.claude` directories are never mounted; shared state uses separate Cloister-managed directories. |
 | Network | Apple container's default network may reach the internet; it is not an egress firewall. |
 | Host commands | Available only when enabled by the Profile, through an authenticated bridge and fixed executable allowlist, with the invoking macOS user's permissions. |
@@ -175,7 +179,7 @@ macOS host
 │   └── authenticated loopback Host MCP bridge
 │       └── Profile-allowed macOS commands
 └── Apple container VM
-    ├── /workspace                 live read-write project mount
+    ├── /workspace/<host-path>     live read-write project mount
     ├── /cloister/agents/<agent>   optional Cloister-managed shared state
     ├── Codex or Claude Code
     └── canonical host-exec skill
@@ -252,6 +256,18 @@ ${XDG_DATA_HOME:-~/.local/share}/cloister/agents/claude
 These directories are owner-only and should be treated as secrets. Cloister
 never substitutes the host's pre-existing agent configuration directories.
 `state = "isolated"` keeps agent state inside the ephemeral container instead.
+
+The upcoming 0.3.1 fix gives each canonical host workspace a distinct, stable
+guest working directory, including projects with the same directory name.
+Repeated launches and symbolic links to the same host directory use the same
+guest path. This lets agents apply
+their normal project filtering to shared session history. Moving a project to a
+different canonical host path changes its guest path.
+
+For Codex, `cloister codex -- resume` uses the current project filter;
+`cloister codex -- resume --all` explicitly shows sessions across projects.
+Existing sessions recorded at the old `/workspace` path remain in shared state
+and can be found with `resume --all`; Cloister does not rewrite their histories.
 
 ### Agent installation and updates
 
@@ -448,7 +464,7 @@ Common agent options:
 
 ```text
 --profile <PATH>          select a non-default Profile
---workspace <DIRECTORY>  mount another project at /workspace
+--workspace <DIRECTORY>  mount another project at its canonical path under /workspace
 --dry-run                print the runtime plan without starting an agent
 --no-host-bridge         reduce authority for one invocation
 --host-bridge-port <N>   select a loopback bridge port (default 0: automatic)
@@ -481,10 +497,11 @@ Cloister classifies an official image before starting an agent:
 - local or third-party images remain available for development but produce a
   warning because Cloister cannot verify their release compatibility.
 
-`cloister check` reports this classification without changing runtime or
-Profile state. Both normal execution and `--dry-run` agent plans fail before
-workspace, bridge, or container side effects when an official release pair is
-incompatible.
+`cloister check` reports this classification without changing the Profile or
+persistent runtime configuration; its connectivity check uses a temporary
+container and listener. Both normal execution and `--dry-run` agent plans fail
+before workspace, bridge, or container side effects when an official release
+pair is incompatible.
 
 The Linux ARM64 base image contains pinned Node.js and Rust, plus Git, build
 tools, `ripgrep`, and `bubblewrap`. It contains no Codex or Claude Code package.

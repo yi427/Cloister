@@ -16,6 +16,12 @@ would expose state that Cloister did not create or select.
 
 ## Decision
 
+The Profile and Agent installation details below are amended by
+[ADR 0008](0008-independent-agent-software-and-concurrent-sessions.md).
+The workspace mount path is superseded by
+[ADR 0009](0009-project-specific-workspace-paths.md). The original decisions
+remain below as history.
+
 The high-level supported-agent workflows are:
 
 ```text

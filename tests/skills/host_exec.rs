@@ -51,7 +51,8 @@ fn keeps_shared_workspace_file_operations_inside_the_guest() {
         "do not Base64-encode a workspace file",
         "`python -c`",
         "prefer paths relative to its",
-        "outside `/workspace`",
+        "initial working directory under `/workspace/`",
+        "outside the selected Guest workspace",
         "Do not treat an allowed interpreter as a Host file API",
     ] {
         assert!(

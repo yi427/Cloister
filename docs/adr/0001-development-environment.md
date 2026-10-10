@@ -3,6 +3,14 @@
 - Status: Accepted for MVP
 - Date: 2026-07-29
 
+## Later amendments
+
+The baseline below records the original decision.
+[ADR 0008](0008-independent-agent-software-and-concurrent-sessions.md) replaces
+bundled Agent versions with independent installation and defines Profile V7.
+[ADR 0009](0009-project-specific-workspace-paths.md) replaces the common
+`/workspace` mount target with project-specific paths.
+
 ## Context
 
 Cloister will provide privacy-oriented development environments for AI coding

@@ -1,6 +1,6 @@
 ---
 name: host-exec
-description: Use the authenticated Cloister Host MCP bridge to discover and run Profile-allowed commands on the macOS host from a Cloister guest. Use when a task needs an available host-native toolchain, build command, or other executable exposed through `cloister_host`, and when reporting Host Exec approvals, denials, output, or policy is required. Do not use for reading, writing, listing, or patching files in the shared Guest `/workspace`; use Guest file tools there.
+description: Use the authenticated Cloister Host MCP bridge to discover and run Profile-allowed commands on the macOS host from a Cloister guest. Use when a task needs an available host-native toolchain, build command, or other executable exposed through `cloister_host`, and when reporting Host Exec approvals, denials, output, or policy is required. Do not use for reading, writing, listing, or patching files in the selected shared Guest workspace; use Guest file tools there.
 ---
 
 # Cloister Host Exec
@@ -10,7 +10,8 @@ Profile returned by the bridge as the authority for the entire bridge session.
 
 ## Choose Guest or Host
 
-- Use Guest file tools to read, write, list, and patch files under `/workspace`.
+- Use Guest file tools to read, write, list, and patch files in the selected
+  Guest workspace: the agent's initial working directory under `/workspace/`.
   It is a live read-write mount of the selected Host workspace, so Guest changes
   already appear in the corresponding Host project.
 - Do not use `host.exec` merely to move workspace content across the Guest/Host
@@ -19,8 +20,9 @@ Profile returned by the bridge as the authority for the entire bridge session.
 - Use Host Exec only when the task requires a Profile-allowed macOS executable.
   When that executable consumes workspace files, prefer paths relative to its
   fixed Host workspace working directory.
-- If a requested file is outside `/workspace`, report that it is outside the
-  shared workspace. Do not treat an allowed interpreter as a Host file API.
+- If a requested file is outside the selected Guest workspace, report that it
+  is outside the shared workspace.
+  Do not treat an allowed interpreter as a Host file API.
 
 ## Execute a host command
 
