@@ -1,5 +1,3 @@
-> 0.3.0 is currently unreleased. This document describes release gates, not completed release evidence.
-
 # Release and image versioning
 
 Cloister keeps application releases, Profile compatibility, image contents,

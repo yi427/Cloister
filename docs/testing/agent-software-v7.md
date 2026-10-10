@@ -82,11 +82,12 @@ the current development build tested successfully and accepted it. This is a
 user-reported acceptance result; exact Agent versions and per-check output were
 not recorded in this confirmation.
 
-## Remaining release acceptance
+## Coverage limits
 
 Version output does not prove authenticated coding, skill selection, MCP
-connection behavior, or tool approvals. Before release, run real Codex and
-Claude tasks with deliberately provisioned test accounts and validate workspace
-editing plus Host Exec discovery/execution/status/cancellation. Record their
+connection behavior, or tool approvals. The user's acceptance above does not
+provide a per-check record for both Agents. For reproducible authenticated
+acceptance, use deliberately provisioned test accounts to validate workspace
+editing plus Host Exec discovery/execution/status/cancellation and record the
 exact independently installed versions. No Profile migration or old-Cloister
 compatibility is promised.
