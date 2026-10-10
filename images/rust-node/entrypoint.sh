@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 mkdir -p "${HOME}" "${CARGO_HOME}" "${CODEX_HOME}" "${CLAUDE_CONFIG_DIR}"
 

@@ -13,12 +13,57 @@ use cloister::{
     runtime::{
         GuestProxyPlan, HOST_BRIDGE_GUEST_NAME, HOST_BRIDGE_LOCALHOST_ADDRESS, HostBridgeLaunch,
         NetworkExposure, dns_create_command, dns_list_command, image_inspect_command,
-        image_pull_command, plan_agent_container, system_start_command, system_status_command,
+        image_pull_command, plan_agent_container as plan_with_software, system_start_command,
+        system_status_command,
     },
 };
 use tempfile::tempdir;
 
 const RELEASE_IMAGE: &str = concat!("ghcr.io/yi427/cloister:", env!("CARGO_PKG_VERSION"));
+
+#[test]
+fn connectivity_probe_has_bounded_resources_and_no_host_mounts_or_secrets() {
+    let mut profile = load_profile(fixture("valid/default.toml")).unwrap();
+    profile.network.proxy = NetworkProxyMode::Inherit;
+    let endpoint = "http://host.container.internal:12345/cloister-check/test-nonce";
+    let command =
+        cloister::runtime::host_connectivity_command(&profile, "cloister-check-test", endpoint);
+    let args: Vec<_> = command
+        .arguments()
+        .iter()
+        .map(|s| s.to_str().unwrap())
+        .collect();
+    assert_eq!(command.program(), "container");
+    assert!(command.secret_environment_names().next().is_none());
+    for forbidden in [
+        "--mount",
+        "--volume",
+        "--ssh",
+        "--env",
+        "--interactive",
+        "--tty",
+    ] {
+        assert!(!args.contains(&forbidden));
+    }
+    assert!(args.contains(&"--rm"));
+    assert!(args.contains(&"--read-only"));
+    assert!(args.contains(&"--ipv4"));
+    for pair in [
+        ["--cpus", "1"],
+        ["--memory", "256M"],
+        ["--entrypoint", "/usr/bin/curl"],
+        ["--noproxy", "*"],
+        ["--connect-timeout", "8"],
+        ["--max-time", "10"],
+    ] {
+        assert!(args.windows(2).any(|window| window == pair));
+    }
+    assert_eq!(args.last(), Some(&endpoint));
+    assert!(
+        args.windows(3)
+            .any(|window| window == ["--", profile.image.reference.as_str(), "--disable"])
+    );
+}
 
 fn fixture(relative_path: impl AsRef<Path>) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -117,10 +162,17 @@ fn translates_every_supported_codex_setting() {
     assert!(arguments.iter().any(|argument| argument == "--read-only"));
     assert!(!arguments.iter().any(|argument| argument == "--ssh"));
     assert_eq!(argument_after(arguments, "--tmpfs"), "/tmp");
+    assert!(
+        arguments
+            .windows(2)
+            .any(|p| p[0] == "--tmpfs" && p[1] == "/cloister/session:mode=1777")
+    );
     assert!(arguments.ends_with(&[
         OsString::from("--"),
         OsString::from("cloister:dev"),
         OsString::from("codex"),
+        OsString::from("--config"),
+        OsString::from("check_for_update_on_startup=false"),
     ]));
 
     let environments = arguments
@@ -250,6 +302,8 @@ fn appends_codex_arguments_without_shell_parsing() {
         OsString::from("--"),
         OsString::from("cloister:dev"),
         OsString::from("codex"),
+        OsString::from("--config"),
+        OsString::from("check_for_update_on_startup=false"),
         OsString::from("--config"),
         OsString::from("model_reasoning_effort=high"),
     ]));
@@ -428,4 +482,66 @@ fn appends_claude_arguments_without_shell_parsing() {
         OsString::from("--model"),
         OsString::from("sonnet"),
     ]));
+}
+
+fn plan_agent_container(
+    resolved: &cloister::preflight::ResolvedLaunch,
+    agent: &dyn cloister::agent::AgentAdapter,
+    shared_state: Option<&Path>,
+    host_bridge: Option<HostBridgeLaunch<'_>>,
+    proxy: Option<&cloister::preflight::ResolvedGuestProxy>,
+    arguments: &[OsString],
+) -> Result<cloister::runtime::RuntimePlan, cloister::runtime::RuntimePlanError> {
+    plan_with_software(
+        resolved,
+        agent,
+        shared_state,
+        host_bridge,
+        proxy,
+        arguments,
+        Path::new("/test-agent-software"),
+    )
+}
+
+#[test]
+fn installer_mounts_only_staging_and_session_software_is_read_only() {
+    let profile = load_profile(fixture("valid/default.toml")).unwrap();
+    let selector = "latest".parse().unwrap();
+    let command = cloister::runtime::agent_install_command(
+        &profile,
+        &CodexAgent,
+        &selector,
+        Some("1.2.3"),
+        Path::new("/test-staging"),
+        None,
+    )
+    .unwrap();
+    let arguments = command.arguments();
+    assert_eq!(arguments.iter().filter(|a| *a == "--mount").count(), 1);
+    assert_eq!(
+        argument_after(arguments, "--mount"),
+        "type=bind,source=/test-staging,target=/cloister/install"
+    );
+    assert_eq!(
+        argument_after(arguments, "--entrypoint"),
+        "/usr/local/bin/cloister-install-agent"
+    );
+    assert!(
+        !arguments
+            .iter()
+            .any(|a| a == "--tty" || a == "--interactive" || a == "CLOISTER_HOST_BRIDGE_TOKEN")
+    );
+    assert!(arguments.ends_with(&[
+        "--".into(),
+        "cloister:dev".into(),
+        "codex".into(),
+        "latest".into(),
+        "1.2.3".into()
+    ]));
+    let session = default_plan();
+    assert!(
+        session.command().arguments().iter().any(
+            |a| a == "type=bind,source=/test-agent-software,target=/cloister/software,readonly"
+        )
+    );
 }

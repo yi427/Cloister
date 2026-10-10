@@ -1,9 +1,9 @@
-# Profile V6 example for Cloister agent commands.
-schema_version = 6
+# Profile V7 example for Cloister agent commands.
+schema_version = 7
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.2.0"
+reference = "ghcr.io/yi427/cloister:0.3.0"
 architecture = "arm64"
 
 [guest]
@@ -19,6 +19,9 @@ proxy = "disabled"
 
 [agent]
 state = "shared"
+codex = "latest"
+claude = "latest"
+update_interval_hours = 24
 
 [host.exec]
 enabled = true

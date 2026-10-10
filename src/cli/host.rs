@@ -50,7 +50,7 @@ enum HostCommand {
         #[arg(long, value_name = "TOKEN_FILE", value_hint = ValueHint::FilePath)]
         token_file: PathBuf,
 
-        /// Path to a Profile V6 TOML file.
+        /// Path to a Profile V7 TOML file.
         ///
         /// Defaults to ~/.config/cloister/profile.toml.
         #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]

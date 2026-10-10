@@ -2,6 +2,7 @@
 
 mod claude;
 mod codex;
+pub mod software;
 
 use std::{
     ffi::{OsStr, OsString},

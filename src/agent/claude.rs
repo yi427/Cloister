@@ -8,7 +8,7 @@ use super::{AgentAdapter, AgentCommand, AgentHostBridge};
 
 const HOST_SKILL_DISCOVERY_ROOT: &str = "/usr/local/share/cloister/claude-skill-root";
 
-/// Adapter for the Claude Code CLI bundled in the Cloister image.
+/// Adapter for the Claude Code CLI installed in the Cloister software cache.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ClaudeAgent;
 

@@ -12,7 +12,6 @@ use std::{
 };
 
 use clap::{Args, ValueHint};
-use serde::Deserialize;
 use tempfile::NamedTempFile;
 
 use crate::{
@@ -36,7 +35,7 @@ use crate::{
 };
 
 use super::{
-    check::{command_description, command_output, execute_checks, parse_json},
+    check::{RuntimeStatus, command_description, command_output, execute_checks, parse_json},
     config::default_profile_path,
 };
 
@@ -50,7 +49,7 @@ const DEFAULT_USER: &str = "cloister";
 
 #[derive(Debug, Args)]
 pub(super) struct InitArgs {
-    /// Path where the new Profile V6 TOML file will be created.
+    /// Path where the new Profile V7 TOML file will be created.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -119,6 +118,10 @@ fn prompt_profile(
     output: &mut impl Write,
 ) -> Result<Profile, InitCommandError> {
     writeln!(output, "Cloister interactive setup")?;
+    writeln!(
+        output,
+        "Agent software: official npm packages, installed on first use; latest checked every 24h. Edit [agent] to pin versions or change the interval."
+    )?;
     writeln!(output, "Press Enter to accept a value shown in brackets.\n")?;
 
     let name = prompt_non_blank(input, output, "Profile name", DEFAULT_NAME)?;
@@ -157,6 +160,9 @@ fn prompt_profile(
             proxy: network_proxy,
         },
         agent: AgentProfile {
+            codex: Default::default(),
+            claude: Default::default(),
+            update_interval_hours: 24,
             state: if persistent_state {
                 AgentState::Shared
             } else {
@@ -658,8 +664,11 @@ async fn inspect_runtime() -> RuntimeState {
         Err(detail) => return RuntimeState::Unavailable(detail),
     };
     if status.status == "running" {
-        RuntimeState::Running {
-            version: status.api_server_version,
+        match status.version() {
+            Some(version) => RuntimeState::Running { version },
+            None => RuntimeState::Unavailable(
+                "running Apple container service omitted its version".to_owned(),
+            ),
         }
     } else {
         RuntimeState::NeedsStart {
@@ -727,13 +736,6 @@ enum RuntimeState {
     Unavailable(String),
     Running { version: String },
     NeedsStart { detail: String },
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RuntimeStatus {
-    api_server_version: String,
-    status: String,
 }
 
 #[derive(Debug)]

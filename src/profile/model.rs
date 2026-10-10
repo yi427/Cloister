@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 6;
+pub const PROFILE_SCHEMA_VERSION: u32 = 7;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -199,7 +199,7 @@ pub enum NetworkMode {
     Default,
 }
 
-/// Host proxy inheritance modes represented by Profile V6.
+/// Host proxy inheritance modes represented by Profile V7.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkProxyMode {
@@ -212,6 +212,56 @@ pub enum NetworkProxyMode {
 #[serde(deny_unknown_fields)]
 pub struct AgentProfile {
     pub state: AgentState,
+    /// Official npm release channel (latest) or an exact stable semantic version.
+    pub codex: AgentVersion,
+    pub claude: AgentVersion,
+    /// Minimum interval between automatic update checks. Zero checks every launch.
+    pub update_interval_hours: u16,
+}
+
+/// A constrained official package selector; arbitrary npm specs are never accepted.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct AgentVersion(String);
+
+impl AgentVersion {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn is_latest(&self) -> bool {
+        self.0 == "latest"
+    }
+}
+
+impl Default for AgentVersion {
+    fn default() -> Self {
+        Self("latest".to_owned())
+    }
+}
+
+impl FromStr for AgentVersion {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "latest"
+            || semver::Version::parse(value)
+                .is_ok_and(|v| v.pre.is_empty() && v.build.is_empty() && v.to_string() == value)
+        {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(
+                "agent version must be 'latest' or an exact stable version such as 1.2.3"
+                    .to_owned(),
+            )
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
+    }
 }
 
 /// Persistence policy for an agent's credentials and local state.

@@ -6,7 +6,6 @@ use std::{
     ffi::OsString,
     fmt, fs, io,
     net::SocketAddr,
-    num::NonZeroU16,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{ExitCode, ExitStatus},
@@ -17,7 +16,10 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    agent::AgentAdapter,
+    agent::{
+        AgentAdapter,
+        software::{self, SoftwareOptions},
+    },
     error::message,
     host_bridge::{
         AuditLogPathError, BridgeToken, BridgeTokenError, HostBridgeContext, HostBridgeServerError,
@@ -28,19 +30,19 @@ use crate::{
         GuestProxyResolutionError, HostExecutableCheckError, PreflightError,
         inspect_host_executable, resolve_guest_proxy, resolve_launch,
     },
-    profile::{AgentState, LoadProfileError, Profile},
+    profile::{AgentState, AgentVersion, LoadProfileError, Profile},
     release::image::{ImageCompatibilityError, classify_image},
     runtime::{
-        HOST_BRIDGE_GUEST_NAME, HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError, execute,
-        plan_agent_container,
+        HOST_BRIDGE_GUEST_NAME, HostBridgeLaunch, RuntimeExecutionError, RuntimePlanError,
+        execute_managed, name_container, plan_agent_container,
     },
 };
 
-use super::config::default_profile_path;
+use super::{config::default_profile_path, signals::SignalGuard};
 
 #[derive(Debug, Args)]
 pub(super) struct AgentArgs {
-    /// Path to a Profile V6 TOML file.
+    /// Path to a Profile V7 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -60,9 +62,22 @@ pub(super) struct AgentArgs {
     #[arg(long)]
     no_host_bridge: bool,
 
-    /// Loopback port used by the default host bridge.
-    #[arg(long, default_value = "17834", value_name = "PORT")]
-    host_bridge_port: NonZeroU16,
+    /// Loopback bridge port; 0 lets the operating system allocate a free port.
+    #[arg(long, default_value = "0", value_name = "PORT")]
+    host_bridge_port: u16,
+
+    /// Use an exact agent version or latest for this invocation.
+    #[arg(long, value_name = "VERSION")]
+    agent_version: Option<AgentVersion>,
+
+    /// Check/install agent software now, regardless of the update interval.
+    #[arg(long, conflicts_with = "offline")]
+    update_agent: bool,
+
+    /// Use installed agent software without checking or downloading updates.
+    /// Does not disable the agent's network access.
+    #[arg(long)]
+    offline: bool,
 
     /// Arguments passed directly to the agent.
     #[arg(last = true, value_name = "ARGUMENT")]
@@ -100,15 +115,39 @@ pub(super) async fn execute_agent(
         validate_host_executables(resolved.profile())?;
     }
 
+    let software_root = software::software_directory(agent).map_err(AgentCommandError::Software)?;
+    software::check_writable_mount(&software_root, resolved.workspace())
+        .map_err(AgentCommandError::Software)?;
     let shared_state = match resolved.profile().agent.state {
         AgentState::Isolated => None,
         AgentState::Shared if arguments.dry_run => Some(agent_state_directory_path(agent)?),
         AgentState::Shared => Some(prepare_agent_state_directory(agent)?),
     };
+    if let Some(state) = &shared_state {
+        software::check_writable_mount(&software_root, state)
+            .map_err(AgentCommandError::Software)?;
+    }
     if host_bridge_enabled {
         validate_host_skill_conflict(agent, shared_state.as_deref())?;
     }
+    let software_options = SoftwareOptions {
+        version: arguments.agent_version,
+        update: arguments.update_agent,
+        offline: arguments.offline,
+    };
+    let selector = software::selected_version(resolved.profile(), agent, &software_options);
     if arguments.dry_run {
+        let cached = software::inspect(&software_root, resolved.profile(), selector)
+            .map_err(AgentCommandError::Software)?;
+        if software_options.offline && cached.is_none() {
+            return Err(AgentCommandError::Software(io::Error::other(
+                "agent software is not installed for this image/version; --offline cannot launch",
+            )));
+        }
+        let software_path = cached
+            .as_ref()
+            .map(|s| s.directory.clone())
+            .unwrap_or_else(|| software_root.join("<selected-at-launch>"));
         let endpoint = host_bridge_endpoint(arguments.host_bridge_port);
         let host_bridge = audit_log_path
             .as_deref()
@@ -120,10 +159,54 @@ pub(super) async fn execute_agent(
             host_bridge,
             guest_proxy.as_ref(),
             &arguments.arguments,
+            &software_path,
         )?;
+        println!(
+            "Agent software policy: {} (automatic checks every {}h; update-now={}; offline={})",
+            selector.as_str(),
+            resolved.profile().agent.update_interval_hours,
+            software_options.update,
+            software_options.offline
+        );
+        println!(
+            "Agent software installed: {}",
+            cached
+                .as_ref()
+                .map_or("not installed; download on launch", |s| s.version.as_str())
+        );
+        if host_bridge_enabled && arguments.host_bridge_port == 0 {
+            println!("Host bridge port: automatic; :0 below is a planning placeholder");
+        }
         print!("{plan}");
         return Ok(ExitCode::SUCCESS);
     }
+
+    let cancellation = CancellationToken::new();
+    let _signals = SignalGuard::start(cancellation.clone()).map_err(AgentCommandError::Software)?;
+    let software = software::prepare(
+        resolved.profile(),
+        agent,
+        guest_proxy.as_ref(),
+        &software_options,
+        &cancellation,
+    )
+    .await
+    .map_err(AgentCommandError::Software)?;
+    println!(
+        "{} version: {} (session software is read-only)",
+        agent.display_name(),
+        software.version
+    );
+
+    let session = format!(
+        "cloister-session-{}",
+        BridgeToken::generate()?
+            .secret()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .take(24)
+            .collect::<String>()
+    );
 
     let host_bridge = if !host_bridge_enabled {
         None
@@ -138,18 +221,20 @@ pub(super) async fn execute_agent(
                 agent.display_name().to_owned(),
                 resolved.workspace().to_owned(),
                 audit_log_path.expect("enabled Host bridge should have an audit path"),
+                &cancellation,
             )
             .await?,
         )
     };
     let bridge_launch = host_bridge.as_ref().map(RunningHostBridge::launch);
-    let plan = match plan_agent_container(
+    let mut plan = match plan_agent_container(
         &resolved,
         agent,
         shared_state.as_deref(),
         bridge_launch,
         guest_proxy.as_ref(),
         &arguments.arguments,
+        &software.directory,
     ) {
         Ok(plan) => plan,
         Err(error) => {
@@ -163,20 +248,21 @@ pub(super) async fn execute_agent(
     if let Some(bridge) = &host_bridge {
         bridge.announce(agent.display_name());
     }
-    let execution = execute(plan.command()).await;
+    name_container(plan.command_mut(), &session);
+    let execution = execute_managed(plan.command(), &session, &cancellation, false).await;
     let shutdown = match host_bridge {
         Some(bridge) => bridge.shutdown().await,
         None => Ok(()),
     };
 
     match (execution, shutdown) {
-        (Err(error), _) => Err(error.into()),
+        (Err(error), _) => Err(AgentCommandError::Software(error)),
         (Ok(_), Err(error)) => Err(error),
         (Ok(status), Ok(())) => Ok(child_exit_code(status)),
     }
 }
 
-fn host_bridge_endpoint(port: NonZeroU16) -> String {
+fn host_bridge_endpoint(port: u16) -> String {
     format!("http://{HOST_BRIDGE_GUEST_NAME}:{port}/mcp")
 }
 
@@ -220,19 +306,24 @@ struct RunningHostBridge {
 
 impl RunningHostBridge {
     async fn start(
-        port: NonZeroU16,
+        port: u16,
         policy: HostExecPolicy,
         profile_name: String,
         agent_name: String,
         working_directory: PathBuf,
         audit_log_path: PathBuf,
+        session_cancellation: &CancellationToken,
     ) -> Result<Self, AgentCommandError> {
         let token = BridgeToken::generate()?;
-        let address = SocketAddr::from(([127, 0, 0, 1], port.get()));
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = TcpListener::bind(address)
             .await
             .map_err(|source| AgentCommandError::BridgeListen { address, source })?;
-        let cancellation = CancellationToken::new();
+        let port = listener
+            .local_addr()
+            .map_err(|source| AgentCommandError::BridgeListen { address, source })?
+            .port();
+        let cancellation = session_cancellation.child_token();
         let server_cancellation = cancellation.clone();
         let server_token = token.clone();
         let allowed_command_count = policy.command_count();
@@ -354,6 +445,7 @@ fn prepare_agent_state_directory(agent: &dyn AgentAdapter) -> Result<PathBuf, Ag
 
 #[derive(Debug)]
 pub(super) enum AgentCommandError {
+    Software(io::Error),
     AuditPath(AuditLogPathError),
     AgentState {
         path: PathBuf,
@@ -399,6 +491,7 @@ pub(super) enum AgentStateDirectoryErrorKind {
 impl fmt::Display for AgentCommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Software(error) => write!(formatter, "agent runtime: {error}"),
             Self::AuditPath(error) => error.fmt(formatter),
             Self::AgentState { path, kind } => {
                 let prefix = match kind {
@@ -465,6 +558,7 @@ impl fmt::Display for AgentCommandError {
 impl Error for AgentCommandError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Software(error) => Some(error),
             Self::AuditPath(error) => Some(error),
             Self::AgentState { kind, .. } => match kind {
                 AgentStateDirectoryErrorKind::Create(source)

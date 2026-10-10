@@ -47,6 +47,56 @@ esac
 "#;
 
 #[test]
+fn accepts_the_container_1_4_nested_server_version() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let project = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    fs::create_dir_all(&project).unwrap();
+    write_default_profile(&home);
+    write_runtime(
+        &bin,
+        &HEALTHY_RUNTIME.replace(
+            "\"apiServerVersion\":\"container-apiserver version 1.2.0\"",
+            "\"server\":{\"appName\":\"container-apiserver\",\"version\":\"1.4.1\"}",
+        ),
+    );
+    let output = run(&home, &project, Some(&bin), &["check"]);
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("[PASS] Runtime: container-apiserver version 1.4.1")
+    );
+}
+
+#[test]
+fn accepts_the_container_1_5_pf_anchor_and_reports_its_runtime_inspection_path() {
+    for mode in ["ready", "fail"] {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let bin = directory.path().join("bin");
+        write_default_profile(&home);
+        write_runtime(&bin, HEALTHY_RUNTIME);
+        let output = run_with_environment(
+            &home,
+            directory.path(),
+            Some(&bin),
+            &["check"],
+            &[("TEST_PF_CONFIG", "nested"), ("TEST_PROBE_MODE", mode)],
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("[PASS] PF configuration:"), "{stdout}");
+        if mode == "ready" {
+            assert!(output.status.success(), "{stdout}");
+            assert!(stdout.contains("[PASS] Host connectivity:"));
+        } else {
+            assert_eq!(output.status.code(), Some(1), "{stdout}");
+            assert!(stdout.contains("sudo pfctl -a com.apple/container -s nat"));
+        }
+    }
+}
+
+#[test]
 fn reports_a_ready_default_environment_without_writing_state() {
     let directory = tempdir().expect("temporary directory should exist");
     let home = directory.path().join("home");
@@ -80,7 +130,9 @@ fn reports_a_ready_default_environment_without_writing_state() {
     assert!(stdout.contains("[PASS] Runtime: container-apiserver version 1.2.0"));
     assert!(stdout.contains(&format!("[PASS] Image: '{RELEASE_IMAGE}' (linux/arm64)")));
     assert!(stdout.contains("[PASS] DNS: 'host.container.internal' is configured"));
-    assert!(stdout.ends_with("All checks passed.\n"));
+    assert!(stdout.contains("[PASS] PF configuration:"));
+    assert!(stdout.contains("[PASS] Host connectivity:"));
+    assert!(stdout.ends_with("All required checks passed; 2 warning(s).\n"));
     assert!(
         !home.join(".local/share/cloister/agents/codex").exists(),
         "check must not create agent state"
@@ -111,7 +163,7 @@ fn rejects_an_official_release_image_that_does_not_match_the_cli() {
     assert!(stdout.contains("[FAIL] Image compatibility: official image version mismatch"));
     assert!(stdout.contains("run 'cloister profile upgrade --dry-run'"));
     assert!(stdout.contains(&format!("[PASS] Image: '{old_image}' (linux/arm64)")));
-    assert!(stdout.ends_with("1 check(s) failed; 0 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 1 skipped.\n"));
 }
 
 #[test]
@@ -135,7 +187,7 @@ fn allows_an_immutable_testing_image_with_a_warning() {
     assert!(stdout.contains("[WARN] Image compatibility: immutable testing image"));
     assert!(stdout.contains(revision));
     assert!(stdout.contains("release compatibility is not guaranteed"));
-    assert!(stdout.ends_with("All required checks passed; 1 warning(s).\n"));
+    assert!(stdout.ends_with("All required checks passed; 3 warning(s).\n"));
 }
 
 #[test]
@@ -235,7 +287,7 @@ fn continues_with_independent_checks_when_the_profile_is_missing() {
     assert!(stdout.contains("[PASS] Runtime:"));
     assert!(stdout.contains("[SKIP] Image: Profile is unavailable"));
     assert!(stdout.contains("[PASS] DNS:"));
-    assert!(stdout.ends_with("1 check(s) failed; 5 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 7 skipped.\n"));
 }
 
 #[test]
@@ -355,7 +407,7 @@ fn skips_runtime_dependent_checks_when_container_is_unavailable() {
     assert!(stdout.contains("[FAIL] Runtime: failed to start 'container'"));
     assert!(stdout.contains("[SKIP] Image: runtime is unavailable"));
     assert!(stdout.contains("[SKIP] DNS: runtime is unavailable"));
-    assert!(stdout.ends_with("1 check(s) failed; 2 skipped.\n"));
+    assert!(stdout.ends_with("1 check(s) failed; 2 warning(s); 4 skipped.\n"));
 }
 
 #[test]
@@ -395,13 +447,218 @@ esac
     assert!(stdout.contains("[FAIL] Image:"));
     assert!(stdout.contains("image not found"));
     assert!(stdout.contains("[FAIL] DNS: 'host.container.internal' is not configured"));
-    assert!(stdout.ends_with("2 check(s) failed; 0 skipped.\n"));
+    assert!(stdout.ends_with("2 check(s) failed; 2 warning(s); 2 skipped.\n"));
+}
+
+#[test]
+fn fails_when_dns_exists_but_pf_configuration_is_disconnected_or_incomplete() {
+    for (state, expected) in [
+        ("disconnected", "does not invoke rdr-anchor"),
+        ("missing-rule", "does not load the expected redirect"),
+        ("invalid", "could not parse /etc/pf.conf"),
+    ] {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let bin = directory.path().join("bin");
+        write_default_profile(&home);
+        write_runtime(&bin, HEALTHY_RUNTIME);
+        let before = fs::read(default_profile_path(&home)).unwrap();
+        let output = run_with_environment(
+            &home,
+            directory.path(),
+            Some(&bin),
+            &["check"],
+            &[("TEST_PF_CONFIG", state)],
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{stdout}");
+        assert!(stdout.contains("[PASS] DNS:"));
+        assert!(stdout.contains("[FAIL] PF configuration:"));
+        assert!(stdout.contains(expected), "{stdout}");
+        assert!(stdout.contains("[SKIP] Host connectivity:"));
+        assert!(stdout.contains("sudo container system dns delete host.container.internal && sudo container system dns create host.container.internal --localhost 203.0.113.113"));
+        assert_eq!(fs::read(default_profile_path(&home)).unwrap(), before);
+        assert!(!home.join(".local").exists());
+    }
+}
+
+#[test]
+fn checks_forwarding_for_loopback_proxy_even_when_host_exec_is_disabled() {
+    for (proxy, required) in [
+        ("http://localhost:3080", true),
+        ("http://proxy.example:8080", false),
+    ] {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let bin = directory.path().join("bin");
+        write_default_profile(&home);
+        let path = default_profile_path(&home);
+        let source = fs::read_to_string(&path)
+            .unwrap()
+            .replace("enabled = true", "enabled = false")
+            .replace("proxy = \"disabled\"", "proxy = \"inherit\"");
+        fs::write(path, source).unwrap();
+        write_runtime(&bin, HEALTHY_RUNTIME);
+        let output = run_with_environment(
+            &home,
+            directory.path(),
+            Some(&bin),
+            &["check"],
+            &[("HTTPS_PROXY", proxy), ("TEST_PF_CONFIG", "disconnected")],
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        if required {
+            assert_eq!(output.status.code(), Some(1), "{stdout}");
+            assert!(stdout.contains("[FAIL] PF configuration:"));
+        } else {
+            assert!(output.status.success(), "{stdout}");
+            assert!(stdout.contains("[SKIP] PF configuration:"));
+        }
+    }
+}
+
+#[test]
+fn connectivity_requires_a_matching_host_request_and_successful_container_exit() {
+    for mode in ["ready", "fail", "no-contact", "wrong-path"] {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let bin = directory.path().join("bin");
+        let record = directory.path().join("probe.log");
+        write_default_profile(&home);
+        write_runtime(&bin, HEALTHY_RUNTIME);
+        let output = run_with_environment(
+            &home,
+            directory.path(),
+            Some(&bin),
+            &["check"],
+            &[
+                ("TEST_PROBE_MODE", mode),
+                ("TEST_PROBE_RECORD", record.to_str().unwrap()),
+            ],
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("[PASS] PF configuration:"));
+        if mode == "ready" {
+            assert!(output.status.success(), "{stdout}");
+            assert!(stdout.contains("[PASS] Host connectivity:"));
+            assert!(!stdout.contains("[WARN] PF runtime:"));
+        } else {
+            assert_eq!(output.status.code(), Some(1), "{stdout}");
+            assert!(stdout.contains("[FAIL] Host connectivity:"));
+            assert!(!stdout.contains("[PASS] Host connectivity:"));
+        }
+        if mode == "no-contact" {
+            assert!(stdout.contains("received no matching request"));
+        }
+        assert_probe_listener_released(&fs::read_to_string(record).unwrap());
+    }
+}
+
+#[test]
+fn connectivity_skips_launch_when_the_image_is_missing() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let bin = directory.path().join("bin");
+    let record = directory.path().join("probe.log");
+    write_default_profile(&home);
+    let runtime = HEALTHY_RUNTIME.replace(
+        "printf '%s\\n' '[{\"variants\":[{\"platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"}}]}]'",
+        "exit 1",
+    );
+    assert_ne!(runtime, HEALTHY_RUNTIME);
+    write_runtime(&bin, &runtime);
+    let output = run_with_environment(
+        &home,
+        directory.path(),
+        Some(&bin),
+        &["check"],
+        &[("TEST_PROBE_RECORD", record.to_str().unwrap())],
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout.contains("[SKIP] Host connectivity: a compatible local image is required"));
+    assert!(
+        !record.exists(),
+        "must not launch/pull a missing probe image"
+    );
+}
+
+#[test]
+fn interrupted_and_timed_out_probes_remove_the_named_container_and_release_listener() {
+    use std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    for interrupt in [true, false] {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let bin = directory.path().join("bin");
+        let record = directory.path().join("probe.log");
+        write_default_profile(&home);
+        write_runtime(&bin, HEALTHY_RUNTIME);
+        let start = Instant::now();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_cloister"))
+            .arg("check")
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", &bin)
+            .env("TEST_PROBE_MODE", "stall")
+            .env("TEST_PROBE_RECORD", &record)
+            .current_dir(directory.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        while fs::read_to_string(&record).unwrap_or_default().is_empty() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "probe did not start"
+            );
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "check exited before probe launch"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if interrupt {
+            // SAFETY: signal only this test's live child.
+            assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(35));
+        assert!(!output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            stdout.contains(if interrupt {
+                "interrupted"
+            } else {
+                "exceeded its 20s deadline"
+            }),
+            "{stdout}"
+        );
+        let log = fs::read_to_string(&record).unwrap();
+        let args: Vec<_> = log.lines().next().unwrap().split_whitespace().collect();
+        let name = args.windows(2).find(|pair| pair[0] == "--name").unwrap()[1];
+        assert!(log.contains(&format!("delete --force {name}")));
+        assert_probe_listener_released(&log);
+    }
+}
+
+fn assert_probe_listener_released(log: &str) {
+    let endpoint = log
+        .split_whitespace()
+        .find(|part| part.starts_with("http://host.container.internal:"))
+        .unwrap();
+    let port = url::Url::parse(endpoint).unwrap().port().unwrap();
+    std::net::TcpListener::bind(("127.0.0.1", port)).expect("probe listener must be released");
 }
 
 fn write_runtime(bin: &Path, contents: &str) {
     fs::create_dir_all(bin).expect("bin directory should be created");
+    super::write_fake_pfctl(bin);
     let runtime = bin.join("container");
-    fs::write(&runtime, contents).expect("fake container runtime should be written");
+    fs::write(&runtime, super::with_connectivity_probe(contents))
+        .expect("fake container runtime should be written");
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755))
         .expect("fake runtime should be executable");
 }
@@ -486,6 +743,10 @@ fn run_with_environment(
     if let Some(path) = path {
         command.env("PATH", path);
     }
+    command
+        .env_remove("TEST_PF_CONFIG")
+        .env_remove("TEST_PROBE_MODE")
+        .env_remove("TEST_PROBE_RECORD");
     for (name, value) in environment {
         command.env(name, value);
     }
