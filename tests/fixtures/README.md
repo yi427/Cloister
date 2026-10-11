@@ -28,3 +28,8 @@ or change the machine's firewall, DNS, or privileges.
 `connectivity-runtime.sh` is prepended to check/init fake runtimes. It substitutes
 a local HTTP request for the probe container, supports failure/interruption
 scenarios, and records only test-controlled arguments in temporary directories.
+
+`on-demand-tool.sh` prints literal arguments and can write a test-controlled
+marker. Host-tool tests install it only in temporary directories to distinguish
+read-only discovery from actual execution. `valid/default.toml` retains V7
+allowlist coverage; `valid/on-demand.toml` covers explicit Profile V8 access.

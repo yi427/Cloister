@@ -81,6 +81,7 @@ fn profile_policy(
 ) -> HostExecPolicy {
     HostExecPolicy::from_profile(
         &HostExecProfile {
+            mode: Default::default(),
             enabled: true,
             environment: HostExecEnvironmentProfile {
                 mode: HostExecEnvironmentMode::InheritAll,
@@ -100,10 +101,143 @@ fn profile_policy(
 
 fn request(command: &str, args: &[&str]) -> HostExecRequest {
     HostExecRequest {
+        reason: None,
         version: HOST_EXEC_DSL_VERSION,
         command: command.to_owned(),
         args: args.iter().map(|argument| (*argument).to_owned()).collect(),
     }
+}
+
+#[tokio::test]
+async fn on_demand_discovers_without_execution_and_runs_without_registration_or_secret_auditing() {
+    use cloister::host_bridge::{HostFindCommandRequest, call_host_find_command};
+    let directory = tempdir().unwrap();
+    let executable = directory.path().join("host-tool");
+    fs::write(&executable, include_str!("../fixtures/on-demand-tool.sh")).unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let marker = directory.path().join("invoked");
+    let profile =
+        cloister::profile::parse_profile(include_str!("../fixtures/profiles/valid/on-demand.toml"))
+            .unwrap();
+    let policy = HostExecPolicy::from_profile(
+        &profile.host.exec,
+        BTreeMap::from([
+            (
+                OsString::from("PATH"),
+                directory.path().as_os_str().to_owned(),
+            ),
+            (
+                OsString::from("CLOISTER_TEST_TOOL_MARKER"),
+                marker.as_os_str().to_owned(),
+            ),
+            (
+                OsString::from("CLOISTER_TEST_SECRET"),
+                OsString::from("environment-secret-value"),
+            ),
+        ]),
+    )
+    .unwrap()
+    .unwrap();
+    let token = create_token(&directory.path().join("bridge.token"));
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+    let metadata = call_host_list_commands(&endpoint, &token).await.unwrap();
+    assert_eq!(metadata.mode, "on-demand");
+    assert!(metadata.commands.is_empty());
+    assert!(
+        !serde_json::to_string(&metadata)
+            .unwrap()
+            .contains("environment-secret-value")
+    );
+    let found = call_host_find_command(
+        &endpoint,
+        &token,
+        &HostFindCommandRequest {
+            command: "host-tool".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(found.available);
+    assert_eq!(found.executable.as_deref(), Some(executable.as_path()));
+    assert!(!marker.exists(), "discovery must not execute the program");
+    let missing = call_host_find_command(
+        &endpoint,
+        &token,
+        &HostFindCommandRequest {
+            command: "missing-tool".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!missing.available);
+    let denied = call_host_exec(&endpoint, &token, &request("host-tool", &[]))
+        .await
+        .unwrap_err();
+    assert!(denied.to_string().contains("requires a nonblank reason"));
+    assert!(!marker.exists());
+    let mut call = request(
+        "host-tool",
+        &["literal; $(never-run)", "argument-secret-value"],
+    );
+    call.reason = Some("purpose-secret-value".to_owned());
+    let output = call_host_exec(&endpoint, &token, &call).await.unwrap();
+    let output = wait_for_terminal(&endpoint, &token, output).await;
+    assert_eq!(output.exit_code, Some(0));
+    assert_eq!(fs::read_to_string(&marker).unwrap(), "invoked\n");
+    let output_text = output
+        .chunks
+        .iter()
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+    assert!(output_text.contains("literal; $(never-run)"));
+    stop(cancellation, handle).await;
+    let audit = fs::read_to_string(audit_path(directory.path())).unwrap();
+    assert!(audit.contains("purpose_required"));
+    for secret in [
+        "purpose-secret-value",
+        "argument-secret-value",
+        "environment-secret-value",
+    ] {
+        assert!(!audit.contains(secret));
+    }
+}
+
+#[tokio::test]
+async fn find_command_cannot_discover_or_enable_unlisted_tools_in_allowlist_mode() {
+    use cloister::host_bridge::{HostFindCommandRequest, call_host_find_command};
+    let directory = tempdir().unwrap();
+    let executable = directory.path().join("host-tool");
+    fs::write(&executable, include_str!("../fixtures/on-demand-tool.sh")).unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let policy = HostExecPolicy::new(
+        [],
+        BTreeMap::from([(
+            OsString::from("PATH"),
+            directory.path().as_os_str().to_owned(),
+        )]),
+    )
+    .unwrap();
+    let token = create_token(&directory.path().join("bridge.token"));
+    let (endpoint, cancellation, handle) = start(token.clone(), policy, directory.path()).await;
+    let metadata = call_host_list_commands(&endpoint, &token).await.unwrap();
+    assert_eq!(metadata.mode, "allowlist");
+    let found = call_host_find_command(
+        &endpoint,
+        &token,
+        &HostFindCommandRequest {
+            command: "host-tool".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!found.available);
+    assert!(found.executable.is_none());
+    assert!(
+        call_host_exec(&endpoint, &token, &request("host-tool", &[]))
+            .await
+            .is_err()
+    );
+    stop(cancellation, handle).await;
 }
 
 async fn wait_for_terminal(

@@ -42,7 +42,7 @@ use super::{config::default_profile_path, signals::SignalGuard};
 
 #[derive(Debug, Args)]
 pub(super) struct AgentArgs {
-    /// Path to a Profile V7 TOML file.
+    /// Path to a Profile V7 or V8 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -299,6 +299,7 @@ struct RunningHostBridge {
     token: BridgeToken,
     endpoint: String,
     allowed_command_count: usize,
+    mode: crate::profile::HostExecMode,
     audit_log_path: PathBuf,
     cancellation: CancellationToken,
     task: JoinHandle<Result<(), HostBridgeServerError>>,
@@ -327,6 +328,7 @@ impl RunningHostBridge {
         let server_cancellation = cancellation.clone();
         let server_token = token.clone();
         let allowed_command_count = policy.command_count();
+        let mode = policy.mode();
         let server_audit_log_path = audit_log_path.clone();
         let task = tokio::spawn(async move {
             serve_host_bridge(
@@ -348,6 +350,7 @@ impl RunningHostBridge {
             token,
             endpoint: host_bridge_endpoint(port),
             allowed_command_count,
+            mode,
             audit_log_path,
             cancellation,
             task,
@@ -365,10 +368,20 @@ impl RunningHostBridge {
             self.audit_log_path.display()
         );
         println!(
-            "Host capabilities: host.list_commands, host.exec, host.exec_status, host.exec_cancel ({} Profile-allowed command(s); macOS user permissions)",
+            "Host capabilities: host.list_commands, host.find_command, host.exec, host.exec_status, host.exec_cancel ({} pinned command(s); macOS user permissions)",
             self.allowed_command_count
         );
-        println!("{agent_name} MCP approval: prompt for host.exec only");
+        println!("Host Exec mode: {}", self.mode.as_str());
+        if self.mode == crate::profile::HostExecMode::OnDemand {
+            println!(
+                "Host access: broad; host startup PATH commands require no registration; each host execution requires a purpose. Guest-first routing is behavioral guidance, not containment."
+            );
+            println!(
+                "{agent_name} MCP approval: auto for Cloister Host tools; client policy may still deny or prompt"
+            );
+        } else {
+            println!("{agent_name} MCP approval: prompt for host.exec only");
+        }
     }
 
     async fn shutdown(self) -> Result<(), AgentCommandError> {

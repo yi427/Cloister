@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::error::message;
 
 /// Schema version implemented by the current profile model.
-pub const PROFILE_SCHEMA_VERSION: u32 = 7;
+pub const PROFILE_SCHEMA_VERSION: u32 = 8;
 
 /// Complete configuration for one Cloister development environment.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, garde::Validate)]
@@ -286,10 +286,44 @@ pub struct HostProfile {
 pub struct HostExecProfile {
     #[garde(skip)]
     pub enabled: bool,
+    /// V7 profiles retain allowlist behavior; V8 requires an explicit mode.
+    #[serde(default)]
+    #[garde(skip)]
+    pub mode: HostExecMode,
     #[garde(skip)]
     pub environment: HostExecEnvironmentProfile,
     #[garde(dive)]
     pub allow: Vec<HostExecAllowProfile>,
+}
+
+/// Host executable selection and Agent approval policy.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostExecMode {
+    #[default]
+    Allowlist,
+    OnDemand,
+}
+
+impl HostExecMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allowlist => "allowlist",
+            Self::OnDemand => "on-demand",
+        }
+    }
+}
+
+impl FromStr for HostExecMode {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "allowlist" => Ok(Self::Allowlist),
+            "on-demand" => Ok(Self::OnDemand),
+            _ => Err("Host Exec mode must be 'allowlist' or 'on-demand'"),
+        }
+    }
 }
 
 /// Environment policy for authorized host commands.

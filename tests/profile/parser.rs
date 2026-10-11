@@ -53,7 +53,7 @@ fn rejects_profile_v5_before_inspecting_its_fields() {
 
     assert_eq!(error.message(), "schema_version is not supported");
     assert!(error.span().is_some());
-    assert!(rendered.contains("found 5; expected 7"));
+    assert!(rendered.contains("found 5; expected 7 or 8"));
     assert!(!rendered.contains("unknown field"));
 }
 
@@ -178,7 +178,7 @@ fn rejects_v6_and_requires_explicit_software_policy() {
         parse_profile(&previous)
             .unwrap_err()
             .to_string()
-            .contains("found 6; expected 7")
+            .contains("found 6; expected 7 or 8")
     );
     for line in [
         "codex = \"latest\"\n",
@@ -208,4 +208,28 @@ fn accepts_only_latest_or_exact_stable_agent_versions() {
             DEFAULT_PROFILE.replace("claude = \"latest\"", &format!("claude = \"{value}\""));
         assert!(parse_profile(&source).is_err(), "{value}");
     }
+}
+
+#[test]
+fn v8_requires_an_explicit_mode_and_v7_retains_allowlist_behavior() {
+    use cloister::profile::HostExecMode;
+    let legacy = parse_profile(DEFAULT_PROFILE).unwrap();
+    assert_eq!(legacy.host.exec.mode, HostExecMode::Allowlist);
+    let v8 = DEFAULT_PROFILE.replace("schema_version = 7", "schema_version = 8");
+    assert!(
+        parse_profile(&v8)
+            .unwrap_err()
+            .message()
+            .contains("explicit host.exec.mode")
+    );
+    let v8 = v8.replace("[host.exec]", "[host.exec]\nmode = \"allowlist\"");
+    assert_eq!(
+        parse_profile(&v8).unwrap().host.exec.mode,
+        HostExecMode::Allowlist
+    );
+    let on_demand =
+        parse_profile(include_str!("../fixtures/profiles/valid/on-demand.toml")).unwrap();
+    assert_eq!(on_demand.host.exec.mode, HostExecMode::OnDemand);
+    assert!(on_demand.host.exec.allow.is_empty());
+    assert!(parse_profile(&v8.replace("mode = \"allowlist\"", "mode = \"automatic\"")).is_err());
 }

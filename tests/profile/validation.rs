@@ -90,3 +90,18 @@ fn rejects_blank_host_command_metadata() {
             .any(|(path, _)| path == "host.exec.allow[0].description")
     );
 }
+
+#[test]
+fn v7_cannot_enable_on_demand_and_v8_can_disable_the_bridge() {
+    let mut profile = valid_profile();
+    profile.host.exec.mode = cloister::profile::HostExecMode::OnDemand;
+    assert!(validate_profile(&profile).is_err());
+    profile.schema_version = 8;
+    validate_profile(&profile).unwrap();
+    profile.host.exec.enabled = false;
+    assert!(
+        cloister::host_bridge::HostExecPolicy::from_profile(&profile.host.exec, Default::default())
+            .unwrap()
+            .is_none()
+    );
+}

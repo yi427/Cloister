@@ -23,7 +23,7 @@ use super::config::default_profile_path;
 
 #[derive(Debug, Args)]
 pub(super) struct CheckArgs {
-    /// Path to a Profile V7 TOML file.
+    /// Path to a Profile V7 or V8 TOML file.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -187,6 +187,15 @@ fn check_host_policy(profile: &Profile, report: &mut CheckReport) {
             policy.allow.len()
         ),
     );
+    let mode_detail = if !policy.enabled {
+        format!("{} (inactive; Host Exec disabled)", policy.mode.as_str())
+    } else {
+        match policy.mode {
+            crate::profile::HostExecMode::Allowlist => "allowlist; only declared command names; execution approvals requested".to_owned(),
+            crate::profile::HostExecMode::OnDemand => "on-demand; broad host startup PATH access; no registration; purpose required; Guest-first guidance is not containment".to_owned(),
+        }
+    };
+    report.pass("Host Exec mode", mode_detail);
 
     let path = env::var_os("PATH");
     for command in &policy.allow {

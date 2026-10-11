@@ -22,9 +22,9 @@ use crate::{
     },
     profile::{
         AgentProfile, AgentState, Architecture, CpuCount, GuestProfile, HostExecAllowProfile,
-        HostExecArguments, HostExecEnvironmentMode, HostExecEnvironmentProfile, HostExecProfile,
-        HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile, NetworkProxyMode,
-        PROFILE_SCHEMA_VERSION, Profile, validate_profile,
+        HostExecArguments, HostExecEnvironmentMode, HostExecEnvironmentProfile, HostExecMode,
+        HostExecProfile, HostProfile, ImageProfile, MemorySize, NetworkMode, NetworkProfile,
+        NetworkProxyMode, PROFILE_SCHEMA_VERSION, Profile, validate_profile,
     },
     release::image::{ImageCompatibilityError, classify_image},
     runtime::{
@@ -49,11 +49,14 @@ const DEFAULT_USER: &str = "cloister";
 
 #[derive(Debug, Args)]
 pub(super) struct InitArgs {
-    /// Path where the new Profile V7 TOML file will be created.
+    /// Path where the new Profile V8 TOML file will be created.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
     profile: Option<PathBuf>,
+    /// Host tool access: allowlist or broad on-demand use of host PATH commands.
+    #[arg(long, default_value = "allowlist", value_name = "MODE")]
+    host_exec_mode: HostExecMode,
 }
 
 impl InitArgs {
@@ -68,7 +71,7 @@ impl InitArgs {
         let mut input = stdin.lock();
         let stdout = io::stdout();
         let mut output = stdout.lock();
-        let profile = prompt_profile(&mut input, &mut output)?;
+        let profile = prompt_profile(&mut input, &mut output, self.host_exec_mode)?;
         print_summary(&path, &profile, &mut output)?;
 
         let runtime = inspect_runtime().await;
@@ -116,6 +119,7 @@ impl InitArgs {
 fn prompt_profile(
     input: &mut impl BufRead,
     output: &mut impl Write,
+    host_exec_mode: HostExecMode,
 ) -> Result<Profile, InitCommandError> {
     writeln!(output, "Cloister interactive setup")?;
     writeln!(
@@ -140,7 +144,11 @@ fn prompt_profile(
         true,
     )?;
     let network_proxy = prompt_network_proxy(input, output)?;
-    let host_commands = prompt_host_commands(input, output)?;
+    let host_commands = if host_exec_mode == HostExecMode::OnDemand {
+        Vec::new()
+    } else {
+        prompt_host_commands(input, output)?
+    };
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
         name,
@@ -171,6 +179,7 @@ fn prompt_profile(
         },
         host: HostProfile {
             exec: HostExecProfile {
+                mode: host_exec_mode,
                 enabled: true,
                 environment: HostExecEnvironmentProfile {
                     mode: HostExecEnvironmentMode::InheritAll,
@@ -457,6 +466,13 @@ fn print_summary(
         AgentState::Isolated => writeln!(output, "  Agent state: isolated (ephemeral)")?,
     }
     let host_policy = &profile.host.exec;
+    writeln!(output, "  Host Exec mode: {}", host_policy.mode.as_str())?;
+    if host_policy.mode == HostExecMode::OnDemand {
+        writeln!(
+            output,
+            "  Broad host authority: commands in the host startup PATH may run with your macOS permissions without registration or Cloister execution prompts. Guest-first routing is behavioral guidance, not containment."
+        )?;
+    }
     writeln!(
         output,
         "  Host exec policy: enabled, inherit-all environment, {} allowed command(s)",

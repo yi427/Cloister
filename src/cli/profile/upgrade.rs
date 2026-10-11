@@ -30,7 +30,7 @@ use super::super::{
 
 #[derive(Debug, Args)]
 pub(super) struct ProfileUpgradeArgs {
-    /// Profile V7 TOML file to upgrade.
+    /// Profile V7 or V8 TOML file to upgrade.
     ///
     /// Defaults to ~/.config/cloister/profile.toml.
     #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]

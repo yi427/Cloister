@@ -60,7 +60,7 @@ fn exposes_the_shared_agent_command_help() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Path to a Profile V7 TOML file"));
+    assert!(stdout.contains("Path to a Profile V7 or V8 TOML file"));
     assert!(stdout.contains("Print the runtime plan without starting the agent"));
     assert!(stdout.contains("Arguments passed directly to the agent"));
 }
@@ -96,7 +96,7 @@ fn dry_run_uses_separate_claude_state_and_transient_host_bridge_config() {
     assert!(stdout.contains("host.container.internal:0/mcp"));
     assert!(stdout.contains("Bearer ${CLOISTER_HOST_BRIDGE_TOKEN}"));
     assert!(stdout.contains("alwaysLoad"));
-    assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(stdout.contains("Host capabilities: host.list_commands, host.find_command, host.exec"));
     assert!(stdout.contains(&format!(
         "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
         home.join(".local/state/cloister/audit/host-exec.jsonl")

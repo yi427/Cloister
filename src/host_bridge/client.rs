@@ -15,7 +15,8 @@ use crate::error::message;
 
 use super::{
     BridgeToken, HostExecCancelOutput, HostExecCancelRequest, HostExecOutput, HostExecRequest,
-    HostExecStatusOutput, HostExecStatusRequest, HostListCommandsOutput,
+    HostExecStatusOutput, HostExecStatusRequest, HostFindCommandOutput, HostFindCommandRequest,
+    HostListCommandsOutput,
 };
 
 /// Calls structured `host.exec` through an authenticated MCP endpoint.
@@ -67,6 +68,21 @@ pub async fn call_host_list_commands(
         token,
         "host.list_commands",
         serde_json::Map::new(),
+    )
+    .await
+}
+
+/// Checks a permitted host executable without starting it.
+pub async fn call_host_find_command(
+    endpoint: &str,
+    token: &BridgeToken,
+    request: &HostFindCommandRequest,
+) -> Result<HostFindCommandOutput, HostBridgeClientError> {
+    call_tool(
+        endpoint,
+        token,
+        "host.find_command",
+        request_arguments(request),
     )
     .await
 }

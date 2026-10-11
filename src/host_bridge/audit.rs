@@ -1036,6 +1036,7 @@ mod tests {
         )
         .expect("test policy should build");
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "tool".to_owned(),
             args: vec![secret.to_owned()],

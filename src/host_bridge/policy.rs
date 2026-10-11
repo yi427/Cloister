@@ -1,11 +1,21 @@
 //! Authorization model for structured host execution.
 
-use std::{collections::BTreeMap, error::Error, ffi::OsString, fmt, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    error::Error,
+    ffi::{OsStr, OsString},
+    fmt,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::profile::{HostExecArguments, HostExecProfile};
+use crate::{
+    preflight::{ResolvedHostExecutable, inspect_host_executable, resolve_host_command},
+    profile::{HostExecArguments, HostExecMode, HostExecProfile},
+};
 
 /// Structured host-execution request version understood by this policy layer.
 pub const HOST_EXEC_DSL_VERSION: u32 = 1;
@@ -20,6 +30,9 @@ pub struct HostExecRequest {
     pub version: u32,
     pub command: String,
     pub args: Vec<String>,
+    /// Short purpose visible in the MCP call; never included in audit logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl fmt::Debug for HostExecRequest {
@@ -102,11 +115,13 @@ impl AllowedHostCommand {
     }
 }
 
-/// Immutable in-memory command allowlist.
-#[derive(Clone, Default, Eq, PartialEq)]
+/// Immutable authorization mode and environment with session-local PATH discovery.
+#[derive(Clone, Default)]
 pub struct HostExecPolicy {
     commands: BTreeMap<String, AllowedHostCommand>,
     environment: HostEnvironment,
+    mode: HostExecMode,
+    discovered: Arc<Mutex<BTreeMap<String, ResolvedHostExecutable>>>,
 }
 
 impl HostExecPolicy {
@@ -126,6 +141,8 @@ impl HostExecPolicy {
         Ok(Self {
             commands: by_name,
             environment,
+            mode: HostExecMode::Allowlist,
+            discovered: Arc::default(),
         })
     }
 
@@ -151,7 +168,9 @@ impl HostExecPolicy {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Self::new(commands, environment).map(Some)
+        let mut policy = Self::new(commands, environment)?;
+        policy.mode = profile.mode;
+        Ok(Some(policy))
     }
 
     /// Resolves a structured request into an executable selected by policy.
@@ -166,18 +185,89 @@ impl HostExecPolicy {
             });
         }
 
-        let allowed = self.commands.get(&request.command).ok_or_else(|| {
-            HostExecAuthorizationError::CommandNotAllowed {
-                command: request.command.clone(),
+        if self.mode == HostExecMode::OnDemand
+            && !request.reason.as_deref().is_some_and(|reason| {
+                !reason.trim().is_empty()
+                    && reason.chars().count() <= 240
+                    && !reason.chars().any(char::is_control)
+            })
+        {
+            return Err(HostExecAuthorizationError::PurposeRequired);
+        }
+        let executable = match self.commands.get(&request.command) {
+            Some(allowed) => allowed.executable.clone(),
+            None if self.mode == HostExecMode::OnDemand => {
+                self.discover(&request.command)?.declared().to_owned()
             }
-        })?;
+            None => {
+                return Err(HostExecAuthorizationError::CommandNotAllowed {
+                    command: request.command.clone(),
+                });
+            }
+        };
 
         Ok(AuthorizedHostCommand {
-            command_name: allowed.name.clone(),
-            executable: allowed.executable.clone(),
+            command_name: request.command.clone(),
+            executable,
             arguments: request.args.clone(),
             environment: self.environment.clone(),
         })
+    }
+
+    pub const fn mode(&self) -> HostExecMode {
+        self.mode
+    }
+
+    /// Checks one permitted command without launching it or changing the Profile.
+    pub fn find_command(
+        &self,
+        command: &str,
+    ) -> Result<Option<ResolvedHostExecutable>, HostExecAuthorizationError> {
+        if let Some(allowed) = self.commands.get(command) {
+            return Ok(inspect_host_executable(&allowed.executable).ok());
+        }
+        if self.mode == HostExecMode::Allowlist {
+            return Ok(None);
+        }
+        match self.discover(command) {
+            Ok(executable) => Ok(Some(executable)),
+            Err(HostExecAuthorizationError::CommandUnavailable { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn discover(
+        &self,
+        command: &str,
+    ) -> Result<ResolvedHostExecutable, HostExecAuthorizationError> {
+        let mut discovered = self
+            .discovered
+            .lock()
+            .map_err(|_| HostExecAuthorizationError::DiscoveryUnavailable)?;
+        if let Some(cached) = discovered.get(command) {
+            let current = inspect_host_executable(cached.declared()).map_err(|_| {
+                HostExecAuthorizationError::CommandChanged {
+                    command: command.to_owned(),
+                }
+            })?;
+            if current.resolved() != cached.resolved() {
+                return Err(HostExecAuthorizationError::CommandChanged {
+                    command: command.to_owned(),
+                });
+            }
+            return Ok(current);
+        }
+        let executable = resolve_host_command(
+            command,
+            self.environment
+                .get(OsStr::new("PATH"))
+                .map(OsString::as_os_str),
+        )
+        .map_err(|_| HostExecAuthorizationError::CommandUnavailable {
+            command: command.to_owned(),
+        })?;
+        discovered.insert(command.to_owned(), executable.clone());
+        Ok(executable)
     }
 
     /// Commands exposed by `host.list_commands`, ordered by stable name.
@@ -185,7 +275,7 @@ impl HostExecPolicy {
         self.commands.values()
     }
 
-    /// Number of commands authorized by this immutable policy.
+    /// Number of pinned commands; on-demand mode also permits Host PATH programs.
     pub fn command_count(&self) -> usize {
         self.commands.len()
     }
@@ -200,6 +290,7 @@ impl fmt::Debug for HostExecPolicy {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HostExecPolicy")
+            .field("mode", &self.mode)
             .field("commands", &self.commands)
             .field(
                 "environment_names",
@@ -290,6 +381,23 @@ impl Error for HostExecPolicyBuildError {}
 pub enum HostExecAuthorizationError {
     UnsupportedVersion { expected: u32, found: u32 },
     CommandNotAllowed { command: String },
+    CommandUnavailable { command: String },
+    CommandChanged { command: String },
+    PurposeRequired,
+    DiscoveryUnavailable,
+}
+
+impl HostExecAuthorizationError {
+    pub(super) const fn failure_kind(&self) -> &'static str {
+        match self {
+            Self::UnsupportedVersion { .. } => "unsupported_version",
+            Self::CommandNotAllowed { .. } => "command_not_allowed",
+            Self::CommandUnavailable { .. } => "command_unavailable",
+            Self::CommandChanged { .. } => "command_changed",
+            Self::PurposeRequired => "purpose_required",
+            Self::DiscoveryUnavailable => "discovery_unavailable",
+        }
+    }
 }
 
 impl fmt::Display for HostExecAuthorizationError {
@@ -302,6 +410,10 @@ impl fmt::Display for HostExecAuthorizationError {
             Self::CommandNotAllowed { command } => {
                 write!(formatter, "host command is not allowed: {command:?}")
             }
+            Self::CommandUnavailable { command } => write!(formatter, "host command is unavailable in the bridge's absolute PATH directories: {command:?}"),
+            Self::CommandChanged { command } => write!(formatter, "discovered host command changed or is no longer executable; restart the bridge to rediscover: {command:?}"),
+            Self::PurposeRequired => formatter.write_str("on-demand host execution requires a nonblank reason of at most 240 characters without control characters"),
+            Self::DiscoveryUnavailable => formatter.write_str("host command discovery is unavailable"),
         }
     }
 }
@@ -341,6 +453,7 @@ mod tests {
     #[test]
     fn resolves_the_executable_only_from_the_allowlist() {
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "xcodebuild".to_owned(),
             args: vec!["-version".to_owned()],
@@ -358,6 +471,7 @@ mod tests {
     #[test]
     fn injects_the_complete_trusted_host_environment() {
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "xcodebuild".to_owned(),
             args: Vec::new(),
@@ -373,6 +487,7 @@ mod tests {
     #[test]
     fn rejects_a_command_that_is_not_in_the_allowlist() {
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "python3".to_owned(),
             args: vec!["-c".to_owned(), "print('host code')".to_owned()],
@@ -394,6 +509,7 @@ mod tests {
             "*.secret".to_owned(),
         ];
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "xcodebuild".to_owned(),
             args: arguments.clone(),
@@ -409,6 +525,7 @@ mod tests {
     #[test]
     fn rejects_an_unsupported_request_version() {
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION + 1,
             command: "xcodebuild".to_owned(),
             args: Vec::new(),
@@ -452,6 +569,7 @@ mod tests {
     #[test]
     fn debug_output_includes_environment_names_without_values() {
         let request = HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "xcodebuild".to_owned(),
             args: vec![SECRET_VALUE.to_owned()],
@@ -491,10 +609,10 @@ mod tests {
             .expect("duplicate test allow entry should be structurally valid");
 
         assert_eq!(
-            HostExecPolicy::new([first, duplicate], HostEnvironment::new()),
-            Err(HostExecPolicyBuildError::DuplicateCommandName {
+            HostExecPolicy::new([first, duplicate], HostEnvironment::new()).unwrap_err(),
+            HostExecPolicyBuildError::DuplicateCommandName {
                 command: "xcodebuild".to_owned()
-            })
+            }
         );
     }
 }

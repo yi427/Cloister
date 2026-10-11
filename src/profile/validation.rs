@@ -6,7 +6,7 @@ use garde::{Error, Path as ValidationPath, Report, Validate};
 
 use crate::error::message;
 
-use super::{PROFILE_SCHEMA_VERSION, Profile};
+use super::{HostExecMode, PROFILE_SCHEMA_VERSION, Profile};
 
 /// Aggregate of all static validation failures found in one profile.
 pub type ProfileValidationErrors = Report;
@@ -22,6 +22,12 @@ pub fn validate_profile(profile: &Profile) -> Result<(), ProfileValidationErrors
     };
 
     let mut names = BTreeSet::new();
+    if profile.schema_version == 7 && profile.host.exec.mode != HostExecMode::Allowlist {
+        report.append(
+            ValidationPath::new("host").join("exec").join("mode"),
+            Error::new("on-demand Host Exec requires Profile V8"),
+        );
+    }
     for command in &profile.host.exec.allow {
         if !names.insert(command.name.as_str()) {
             report.append(
@@ -39,11 +45,11 @@ pub fn validate_profile(profile: &Profile) -> Result<(), ProfileValidationErrors
 }
 
 pub(super) fn validate_schema_version(value: &u32, _: &()) -> garde::Result {
-    if *value == PROFILE_SCHEMA_VERSION {
+    if *value == 7 || *value == PROFILE_SCHEMA_VERSION {
         Ok(())
     } else {
         Err(Error::new(format!(
-            "{}: found {value}; expected {PROFILE_SCHEMA_VERSION}",
+            "{}: found {value}; expected 7 or {PROFILE_SCHEMA_VERSION}",
             message::UNSUPPORTED_SCHEMA_VERSION
         )))
     }

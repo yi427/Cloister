@@ -95,7 +95,7 @@ fn dry_run_reports_the_release_image_upgrade_without_side_effects() {
     assert!(output.stderr.is_empty());
     assert!(stdout.contains("Profile upgrade plan:"));
     assert!(stdout.contains(&format!("Image: {OLD_IMAGE} -> {RELEASE_IMAGE}")));
-    assert!(stdout.contains("Profile schema: 7 (unchanged)"));
+    assert!(stdout.contains("Profile schema: 8 (unchanged)"));
     assert!(stdout.contains("Dry run: no image pulled and no files changed."));
     assert_eq!(fs::read(&profile).expect("Profile should remain"), original);
     assert!(!backup_path(&profile).exists());

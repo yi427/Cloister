@@ -496,7 +496,7 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
         format!("mcp_servers.cloister_host.url=\"{endpoint}\""),
         "mcp_servers.cloister_host.bearer_token_env_var=\"CLOISTER_HOST_BRIDGE_TOKEN\"".to_owned(),
         "mcp_servers.cloister_host.required=true".to_owned(),
-        "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\",\"host.exec_status\",\"host.exec_cancel\"]".to_owned(),
+        "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.find_command\",\"host.exec\",\"host.exec_status\",\"host.exec_cancel\"]".to_owned(),
         "mcp_servers.cloister_host.default_tools_approval_mode=\"auto\"".to_owned(),
         "mcp_servers.cloister_host.tools.\"host.exec\".approval_mode=\"prompt\"".to_owned(),
     ] {
@@ -515,7 +515,9 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
 
     let display = plan.to_string();
     let debug = format!("{plan:?}");
-    assert!(display.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(
+        display.contains("Host capabilities: host.list_commands, host.find_command, host.exec")
+    );
     assert!(display.contains(&format!(
         "Host audit log: {} (JSONL, owner-only, 20 MiB total)",
         audit_log_path.display()
@@ -529,6 +531,76 @@ fn injects_the_authenticated_host_bridge_without_rendering_its_token() {
     assert!(display.contains("[REDACTED]"));
     assert!(!display.contains(token));
     assert!(!debug.contains(token));
+}
+
+#[test]
+fn on_demand_is_visible_and_auto_approves_only_host_tools_for_both_agents() {
+    let directory = tempdir().unwrap();
+    let profile = load_profile(fixture("valid/on-demand.toml")).unwrap();
+    let resolved = resolve_launch(profile, directory.path()).unwrap();
+    let audit = directory.path().join("audit.jsonl");
+    for agent in [&CodexAgent as &dyn AgentAdapter, &ClaudeAgent] {
+        let plan = plan_agent_container(
+            &resolved,
+            agent,
+            None,
+            Some(HostBridgeLaunch::dry_run(
+                "http://host.container.internal:0/mcp",
+                &audit,
+            )),
+            None,
+            &[],
+        )
+        .unwrap();
+        let display = plan.to_string();
+        assert!(display.contains("Host Exec mode: on-demand"));
+        assert!(display.contains("Host access: broad"));
+        assert!(display.contains("behavioral guidance, not containment"));
+        assert!(display.contains("Host credential mounts: none"));
+        let args = plan
+            .command()
+            .arguments()
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>();
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.contains("dangerously-skip-permissions"))
+        );
+        if agent.display_name() == "Codex" {
+            assert!(args.iter().any(|arg| arg.as_ref()
+                == "mcp_servers.cloister_host.tools.\"host.exec\".approval_mode=\"auto\""));
+            assert!(
+                !args
+                    .iter()
+                    .any(|arg| arg.contains("approval_mode=\"prompt\""))
+            );
+        } else {
+            let allowed = args
+                .windows(2)
+                .find(|pair| pair[0] == "--allowedTools")
+                .unwrap();
+            let names = allowed[1].split(',').collect::<Vec<_>>();
+            assert_eq!(names.len(), 5);
+            assert!(
+                names
+                    .iter()
+                    .all(|name| name.starts_with("mcp__cloister_host__host."))
+            );
+            assert!(names.contains(&"mcp__cloister_host__host.find_command"));
+            assert!(names.contains(&"mcp__cloister_host__host.exec"));
+        }
+    }
+    let plan = plan_agent_container(&resolved, &CodexAgent, None, None, None, &[]).unwrap();
+    assert!(plan.to_string().contains("Host bridge: disabled"));
+    assert!(
+        !plan
+            .command()
+            .arguments()
+            .iter()
+            .any(|arg| arg.to_string_lossy().contains("mcp_servers.cloister_host"))
+    );
 }
 
 #[test]
