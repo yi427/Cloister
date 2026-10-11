@@ -161,8 +161,10 @@ pub fn plan_agent_container(
             })
         }
     };
-    let agent_bridge = host_bridge
-        .map(|bridge| AgentHostBridge::new(bridge.endpoint, HOST_BRIDGE_TOKEN_ENVIRONMENT));
+    let agent_bridge = host_bridge.map(|bridge| {
+        AgentHostBridge::new(bridge.endpoint, HOST_BRIDGE_TOKEN_ENVIRONMENT)
+            .with_mode(resolved.profile().host.exec.mode)
+    });
     let host_commands = match host_bridge {
         Some(_) if !resolved.profile().host.exec.enabled => {
             return Err(RuntimePlanError::HostExecDisabled);
@@ -238,6 +240,7 @@ pub fn plan_agent_container(
         agent_state,
         host_bridge_endpoint: host_bridge.map(|bridge| bridge.endpoint.to_owned()),
         host_audit_log_path: host_bridge.map(|bridge| bridge.audit_log_path.to_owned()),
+        host_exec_mode: host_bridge.map(|_| resolved.profile().host.exec.mode),
         host_commands,
         command,
     })

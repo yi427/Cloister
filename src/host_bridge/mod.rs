@@ -15,7 +15,7 @@ pub use audit::{
 };
 pub use client::{
     HostBridgeClientError, call_host_exec, call_host_exec_cancel, call_host_exec_status,
-    call_host_list_commands,
+    call_host_find_command, call_host_list_commands,
 };
 pub use command::build_host_process;
 pub use execution::{
@@ -28,4 +28,7 @@ pub use policy::{
 };
 pub use server::{HostBridgeContext, HostBridgeServerError, serve};
 pub use token::{BridgeToken, BridgeTokenError};
-pub use tools::{HostCommandInfo, HostEnvironmentInfo, HostListCommandsOutput};
+pub use tools::{
+    HostCommandInfo, HostEnvironmentInfo, HostFindCommandOutput, HostFindCommandRequest,
+    HostListCommandsOutput,
+};

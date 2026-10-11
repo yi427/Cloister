@@ -23,6 +23,7 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::message;
+use crate::profile::HostExecMode;
 
 use super::{
     AuditLogError, BridgeToken, HostExecPolicy, audit::AuditController,
@@ -52,11 +53,13 @@ impl HostBridgeService {
             .get_mut("host.exec")
             .expect("the host.exec route should be generated");
         let mut metadata = MetaObject::new();
-        metadata.0.insert(
-            REQUIRES_USER_INTERACTION.to_owned(),
-            serde_json::Value::Bool(true),
-        );
-        host_exec.attr.meta = Some(metadata);
+        if policy.mode() == HostExecMode::Allowlist {
+            metadata.0.insert(
+                REQUIRES_USER_INTERACTION.to_owned(),
+                serde_json::Value::Bool(true),
+            );
+            host_exec.attr.meta = Some(metadata);
+        }
 
         Self {
             policy,
@@ -71,7 +74,7 @@ impl HostBridgeService {
 impl HostBridgeService {
     #[tool(
         name = "host.list_commands",
-        description = "List the fixed Host working directory and commands allowed by the immutable Cloister Profile policy",
+        description = "Read Host Exec mode, fixed Host working directory, pinned commands and non-secret environment metadata. In on-demand mode other host PATH commands are also available; use host.find_command to discover them. Prefer Guest tools unless macOS capabilities or a missing Guest tool require Host execution.",
         annotations(read_only_hint = true)
     )]
     async fn host_list_commands(&self) -> Json<super::HostListCommandsOutput> {
@@ -83,8 +86,22 @@ impl HostBridgeService {
     }
 
     #[tool(
+        name = "host.find_command",
+        description = "Check one host command without executing it. In on-demand mode resolves a bare name from the bridge's startup PATH and caches its location for this session; in allowlist mode checks only allowed names. Returns executable and canonical target paths. Prefer Guest tools when available.",
+        annotations(read_only_hint = true)
+    )]
+    async fn host_find_command(
+        &self,
+        Parameters(input): Parameters<super::HostFindCommandRequest>,
+    ) -> Result<Json<super::HostFindCommandOutput>, String> {
+        tools::host_find_command(&self.policy, &input)
+            .map(Json)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
         name = "host.exec",
-        description = "Execute one Profile-allowed host command with a literal argument vector and no shell parsing"
+        description = "Execute a host command with literal arguments, using macOS user permissions and the fixed Host workspace. Check host.list_commands for the mode first. Allowlist mode accepts only pinned names. On-demand mode also accepts bare host PATH names and requires a short reason explaining why Guest tools cannot do the task; discover with host.find_command and state the purpose before invoking. Prefer Guest file tools for workspace edits."
     )]
     async fn host_exec(
         &self,
@@ -134,7 +151,7 @@ impl HostBridgeService {
 impl ServerHandler for HostBridgeService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Call host.list_commands before host.exec. It reports the fixed Host working directory and immutable Profile-allowed commands; prefer workspace-relative paths. host.exec starts only an allowed executable and returns an execution ID. While it is running, call host.exec_status with its cursor and a bounded wait for new output or completion. Call host.exec_cancel when a running execution is no longer needed. Arguments are passed literally without a shell, and host processes still use the permissions of the macOS user running this bridge.",
+            "Call host.list_commands first and follow its mode. Prefer Guest file tools and Guest commands. Use Host execution only for macOS capabilities or a required tool missing in the Guest. In allowlist mode use only listed names; in on-demand mode call host.find_command for a bare host PATH name, reuse discovery, and supply a short reason to host.exec. Explain each host operation before invoking it; use workspace-relative paths. Do not use Host interpreters or shells to transfer files or turn routine Guest work into Host execution. Read running output using host.exec_status with its cursor and a bounded wait; cancel unwanted work with host.exec_cancel. The reason and these routing rules are behavioral guidance, not containment. On-demand grants broad macOS-user authority and does not ask for per-command registration or Cloister execution approvals; client policies may still deny or prompt. Arguments are literal with no implicit shell parsing.",
         )
     }
 }
@@ -330,6 +347,54 @@ mod tests {
     use crate::host_bridge::{HostEnvironment, HostExecPolicy, audit::AuditController};
 
     #[tokio::test]
+    async fn on_demand_does_not_request_claude_execution_interaction() {
+        let directory = tempdir().unwrap();
+        let audit = AuditController::start(
+            directory
+                .path()
+                .join("state/cloister/audit/host-exec.jsonl"),
+            "test".to_owned(),
+            "test-agent".to_owned(),
+            directory.path().to_owned(),
+        )
+        .unwrap();
+        let profile = crate::profile::parse_profile(include_str!(
+            "../../tests/fixtures/profiles/valid/on-demand.toml"
+        ))
+        .unwrap();
+        let policy = HostExecPolicy::from_profile(&profile.host.exec, HostEnvironment::new())
+            .unwrap()
+            .unwrap();
+        let executions = ExecutionManager::new(audit.log());
+        let service = HostBridgeService::new(
+            Arc::new(policy),
+            Arc::new(directory.path().to_owned()),
+            Arc::clone(&executions),
+        );
+        let tools = service.tool_router.list_all();
+        let execution = tools.iter().find(|tool| tool.name == "host.exec").unwrap();
+        assert!(
+            execution
+                .meta
+                .as_ref()
+                .and_then(|metadata| metadata.0.get(REQUIRES_USER_INTERACTION))
+                .is_none()
+        );
+        assert!(
+            tools
+                .iter()
+                .find(|tool| tool.name == "host.find_command")
+                .unwrap()
+                .annotations
+                .as_ref()
+                .is_some_and(|annotations| annotations.read_only_hint == Some(true))
+        );
+        drop(service);
+        executions.shutdown().await;
+        audit.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn exposes_discovery_and_structured_execution_tools() {
         let directory = tempdir().expect("temporary directory should exist");
         let audit = AuditController::start(
@@ -362,6 +427,7 @@ mod tests {
                 "host.exec",
                 "host.exec_cancel",
                 "host.exec_status",
+                "host.find_command",
                 "host.list_commands"
             ]
         );

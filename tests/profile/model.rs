@@ -1,4 +1,4 @@
-//! Public Profile V7 model integration tests.
+//! Public Profile V8 model integration tests.
 
 use std::{collections::BTreeMap, ffi::OsString, path::Path};
 
@@ -13,7 +13,7 @@ use cloister::{
 };
 
 #[test]
-fn constructs_profile_v7_through_the_public_api() {
+fn constructs_profile_v8_through_the_public_api() {
     let profile = Profile {
         schema_version: PROFILE_SCHEMA_VERSION,
         name: "rust-default".to_owned(),
@@ -40,6 +40,7 @@ fn constructs_profile_v7_through_the_public_api() {
         },
         host: HostProfile {
             exec: HostExecProfile {
+                mode: Default::default(),
                 enabled: true,
                 environment: HostExecEnvironmentProfile {
                     mode: HostExecEnvironmentMode::InheritAll,
@@ -54,7 +55,7 @@ fn constructs_profile_v7_through_the_public_api() {
         },
     };
 
-    assert_eq!(profile.schema_version, 7);
+    assert_eq!(profile.schema_version, 8);
     assert_eq!(profile.image.architecture, Architecture::Arm64);
     assert_eq!(profile.guest.cpus.get(), 4);
     assert_eq!(profile.guest.memory.as_mebibytes(), 8192);
@@ -82,6 +83,7 @@ fn converts_the_enabled_profile_allowlist_into_host_policy() {
         .expect("enabled Profile should produce a policy");
     let authorized = policy
         .authorize(&HostExecRequest {
+            reason: None,
             version: HOST_EXEC_DSL_VERSION,
             command: "xcodebuild".to_owned(),
             args: vec!["-version".to_owned()],

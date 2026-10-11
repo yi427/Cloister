@@ -5,6 +5,7 @@ use std::{ffi::OsString, path::Path};
 use serde_json::json;
 
 use super::{AgentAdapter, AgentCommand, AgentHostBridge};
+use crate::profile::HostExecMode;
 
 const HOST_SKILL_DISCOVERY_ROOT: &str = "/usr/local/share/cloister/claude-skill-root";
 
@@ -57,6 +58,10 @@ impl AgentAdapter for ClaudeAgent {
             });
             command_arguments.push(OsString::from("--mcp-config"));
             command_arguments.push(OsString::from(config.to_string()));
+            if bridge.mode() == HostExecMode::OnDemand {
+                command_arguments.push(OsString::from("--allowedTools"));
+                command_arguments.push(OsString::from("mcp__cloister_host__host.list_commands,mcp__cloister_host__host.find_command,mcp__cloister_host__host.exec,mcp__cloister_host__host.exec_status,mcp__cloister_host__host.exec_cancel"));
+            }
         }
         command_arguments.extend_from_slice(arguments);
 

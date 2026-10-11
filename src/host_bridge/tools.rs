@@ -20,6 +20,8 @@ use super::{
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct HostListCommandsOutput {
     pub version: u32,
+    /// allowlist or explicitly enabled on-demand PATH lookup.
+    pub mode: String,
     pub working_directory: PathBuf,
     pub commands: Vec<HostCommandInfo>,
     pub environment: HostEnvironmentInfo,
@@ -41,6 +43,38 @@ pub struct HostEnvironmentInfo {
     pub variable_names: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostFindCommandRequest {
+    pub command: String,
+}
+
+/// Availability is relative to the active policy, not a host-wide inventory.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct HostFindCommandOutput {
+    pub command: String,
+    pub available: bool,
+    pub executable: Option<PathBuf>,
+    pub resolved: Option<PathBuf>,
+}
+
+pub(super) fn host_find_command(
+    policy: &HostExecPolicy,
+    request: &HostFindCommandRequest,
+) -> Result<HostFindCommandOutput, super::HostExecAuthorizationError> {
+    let executable = policy.find_command(&request.command)?;
+    Ok(HostFindCommandOutput {
+        command: request.command.clone(),
+        available: executable.is_some(),
+        executable: executable
+            .as_ref()
+            .map(|executable| executable.declared().to_owned()),
+        resolved: executable
+            .as_ref()
+            .map(|executable| executable.resolved().to_owned()),
+    })
+}
+
 pub(super) fn host_list_commands(
     policy: &HostExecPolicy,
     working_directory: &Path,
@@ -48,6 +82,7 @@ pub(super) fn host_list_commands(
 ) -> HostListCommandsOutput {
     HostListCommandsOutput {
         version: HOST_EXEC_DSL_VERSION,
+        mode: policy.mode().as_str().to_owned(),
         working_directory: working_directory.to_owned(),
         commands: policy
             .commands()
@@ -142,6 +177,7 @@ mod tests {
             &executions,
             &policy,
             &HostExecRequest {
+                reason: None,
                 version: HOST_EXEC_DSL_VERSION,
                 command: "printer".to_owned(),
                 args: vec!["$(uname)".to_owned(), "; exit 0".to_owned()],
@@ -216,6 +252,7 @@ mod tests {
 
     fn profile(name: &str, executable: std::path::PathBuf) -> HostExecProfile {
         HostExecProfile {
+            mode: Default::default(),
             enabled: true,
             environment: HostExecEnvironmentProfile {
                 mode: HostExecEnvironmentMode::InheritAll,

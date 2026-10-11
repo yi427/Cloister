@@ -9,6 +9,7 @@ use std::{
     path::Path,
 };
 
+use crate::profile::HostExecMode;
 pub use claude::ClaudeAgent;
 pub use codex::CodexAgent;
 
@@ -17,6 +18,7 @@ pub use codex::CodexAgent;
 pub struct AgentHostBridge<'a> {
     endpoint: &'a str,
     bearer_token_environment: &'static str,
+    mode: HostExecMode,
 }
 
 impl<'a> AgentHostBridge<'a> {
@@ -24,7 +26,17 @@ impl<'a> AgentHostBridge<'a> {
         Self {
             endpoint,
             bearer_token_environment,
+            mode: HostExecMode::Allowlist,
         }
+    }
+
+    pub const fn with_mode(mut self, mode: HostExecMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub const fn mode(self) -> HostExecMode {
+        self.mode
     }
 
     pub const fn endpoint(self) -> &'a str {

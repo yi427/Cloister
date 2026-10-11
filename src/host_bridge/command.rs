@@ -40,6 +40,7 @@ mod tests {
         .expect("test policy should be valid");
         let authorized = policy
             .authorize(&HostExecRequest {
+                reason: None,
                 version: HOST_EXEC_DSL_VERSION,
                 command: "env".to_owned(),
                 args: Vec::new(),

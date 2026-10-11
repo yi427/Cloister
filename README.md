@@ -27,16 +27,16 @@ authority inspectable:
   silently;
 - CPU, memory, locale, timezone, user, image, network, and proxy choices come
   from a versioned Profile;
-- optional macOS commands pass through an authenticated bridge and immutable
-  executable allowlist; and
+- optional macOS commands pass through an authenticated bridge with an explicit
+  allowlist or on-demand policy; and
 - dry-run plans, readiness checks, and audit metadata expose the
   active boundaries without printing secrets.
 
 > [!NOTE]
-> [0.3.1](https://github.com/yi427/Cloister/releases/tag/v0.3.1) includes the
-> project-specific workspace fix and uses Profile V7. Existing V7 Profiles can
-> update their image with `cloister profile upgrade`; older schemas require a
-> new Profile. See the [release notes](docs/releases/v0.3.1.md).
+> [0.4.0](https://github.com/yi427/Cloister/releases/tag/v0.4.0) adds explicit
+> on-demand Host tools in Profile V8. Existing V7 Profiles keep allowlist
+> behavior and can update their image with `cloister profile upgrade`.
+> See the [release notes](docs/releases/v0.4.0.md).
 
 ## Quick start
 
@@ -94,18 +94,18 @@ Direct source installation requires Rust 1.97.1 or newer with Cargo:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.3.1 \
+  --tag v0.4.0 \
   cloister
 ```
 
 ### Upgrade
 
-Profile V6 users must create a new V7 Profile; `profile upgrade` does not migrate
-schemas. For current-schema Profiles, the CLI tag and base image are one release pair:
+Profile V6 and earlier require a new V8 Profile; `profile upgrade` does not
+migrate schemas. Supported V7 and V8 Profiles pair the CLI tag and base image:
 
 ```text
-CLI:   v0.3.1
-Image: ghcr.io/yi427/cloister:0.3.1
+CLI:   v0.4.0
+Image: ghcr.io/yi427/cloister:0.4.0
 ```
 
 Cloister refuses to start an agent when an official release image does not
@@ -130,13 +130,18 @@ pulls an image during `--dry-run`.
 | Workspace | One explicitly selected host directory mounted live at its canonical path under `/workspace` as read-write. |
 | Agent credentials and state | Existing host `~/.codex` and `~/.claude` directories are never mounted; shared state uses separate Cloister-managed directories. |
 | Network | Apple container's default network may reach the internet; it is not an egress firewall. |
-| Host commands | Available only when enabled by the Profile, through an authenticated bridge and fixed executable allowlist, with the invoking macOS user's permissions. |
+| Host commands | Available only when enabled by the Profile, through an authenticated bridge; the Profile selects a fixed allowlist or broad on-demand host PATH access, with the invoking macOS user's permissions. |
 | Observability | Dry-run plans, readiness checks, and bounded audit metadata expose active policy without persisting secrets or command output. |
 
 ## Security model
 
 Cloister reduces ambient host access; it is not a complete sandbox for every
 capability it exposes.
+
+Cloister 0.4.0 adds Profile V8 and explicit on-demand Host tools.
+V7 Profiles keep their existing allowlist behavior. Enabling on-demand
+requires V8 and the matching 0.4.0 guest image, which includes the updated
+canonical Host Skill.
 
 > [!WARNING]
 > The workspace is a live read-write bind mount. An agent can modify or delete
@@ -146,13 +151,16 @@ capability it exposes.
 > Host Exec is an explicit escape hatch from the guest boundary. An allowed
 > command runs as the macOS user who started Cloister. Interpreters and build
 > tools such as `python`, `cargo`, and `xcodebuild` may provide broad host code
-> execution even when only their executable names are allowlisted.
+> execution even when only their executable names are allowlisted. On-demand
+> mode explicitly grants broad access to host PATH programs. Guest-first
+> instructions and required purpose text guide Agent behavior; they do not
+> contain filesystem or network access by host commands.
 
 The following claims are intentionally narrow:
 
 - host credential directories and privileged sockets are never mounted
   silently;
-- Profile validation and Host Exec allowlist checks fail closed;
+- Profile validation and mode-specific Host Exec checks fail closed;
 - arguments are passed directly as an argument vector without shell parsing;
 - the default Apple container network may reach the internet and is not an
   egress firewall;
@@ -194,14 +202,14 @@ The default path is:
 ${XDG_CONFIG_HOME:-~/.config}/cloister/profile.toml
 ```
 
-An abbreviated Profile V7 looks like this:
+An abbreviated Profile V8 looks like this:
 
 ```toml
-schema_version = 7
+schema_version = 8
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.3.1"
+reference = "ghcr.io/yi427/cloister:0.4.0"
 architecture = "arm64"
 
 [guest]
@@ -223,6 +231,7 @@ update_interval_hours = 24 # 0 checks on every launch
 
 [host.exec]
 enabled = true
+mode = "allowlist" # or explicitly enable broad "on-demand" host access
 
 [host.exec.environment]
 mode = "inherit-all"
@@ -234,10 +243,10 @@ description = "Build and test Xcode projects"
 arguments = "any"
 ```
 
-The complete release-aligned example is
-[`examples/profile.toml`](examples/profile.toml). Earlier Profile versions are
-rejected. Cloister does not silently migrate incompatible Profiles during the
-pre-1.0 development period.
+The complete allowlist example is [`examples/profile.toml`](examples/profile.toml).
+[`examples/profile-on-demand.toml`](examples/profile-on-demand.toml) shows the
+new mode. V8 requires an explicit `host.exec.mode`. V7 remains supported with
+allowlist behavior; V6 and earlier are rejected. No Profile is silently migrated.
 
 ### Agent state
 
@@ -337,17 +346,62 @@ The complete contract is documented in
 
 When `[host.exec] enabled = true`, Cloister starts an authenticated MCP server
 on macOS loopback and injects it into the selected agent as `cloister_host`.
-The server exposes four tools:
+The server exposes five tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `host.list_commands` | Discover the fixed Host working directory, immutable Profile allowlist, and non-secret environment metadata. |
-| `host.exec` | Start one allowed executable with a literal argument vector. |
+| `host.list_commands` | Discover the active mode, fixed Host working directory, pinned commands, and non-secret environment metadata. |
+| `host.find_command` | Check one permitted program without executing it; on-demand mode also searches the host startup PATH. |
+| `host.exec` | Start one permitted executable with a literal argument vector; on-demand mode requires a short `reason`. |
 | `host.exec_status` | Read state and incremental output, optionally waiting for a change. |
 | `host.exec_cancel` | Cancel an execution and its process group. |
 
-The first policy version allows arbitrary arguments for an allowed executable.
+Both modes allow arbitrary arguments for a permitted executable.
 This broad permission is represented explicitly as `arguments = "any"`.
+
+### On-demand Host tools (development)
+
+Explicitly select the mode in Profile V8:
+
+```toml
+schema_version = 8
+# Keep the other required Profile sections.
+[host.exec]
+enabled = true
+mode = "on-demand"
+allow = []
+
+[host.exec.environment]
+mode = "inherit-all"
+```
+
+For a new Profile, `cloister init --host-exec-mode on-demand` selects this mode
+and shows the broad authorization before the normal Profile creation confirmation.
+Default initialization selects `allowlist`.
+
+An Agent reads the mode, checks a required host tool with `host.find_command`,
+then calls `host.exec` without registering the program or editing the Profile.
+Pinned allow entries take precedence; otherwise only bare command names are
+resolved from absolute directories in Cloister's startup PATH. Empty and
+relative PATH entries are ignored. Shell aliases and functions are unavailable.
+Successful discovery is cached for the bridge session; a missing executable or
+changed canonical target requires a bridge restart. The cache is not an
+executable integrity guarantee.
+
+The canonical Skill and MCP instructions prefer Guest file tools and Guest
+commands. Host execution is reserved for macOS capabilities or required tools
+missing in the Guest. Each on-demand execution requires a nonblank `reason` of
+at most 240 characters, without control characters. The purpose is visible in
+the tool call; audit logs retain neither purpose text nor argument values.
+This requirement cannot establish whether an Agent's explanation is true.
+
+In on-demand mode Codex's Cloister Host tools use automatic approval, Claude
+receives exact allow rules for the five Cloister Host tools, and the bridge
+does not request Claude execution interaction. Other tools and servers retain
+their policies. Client deny/ask policies and explicit user overrides may still
+prompt. In allowlist mode the existing `host.exec` approval behavior remains.
+
+See [the development acceptance procedure](docs/testing/on-demand-host-tools.md).
 
 Long-running work has no global timeout. `host.exec` returns an execution ID
 after a 100 ms inline window. Callers can ask `host.exec_status` to wait up to

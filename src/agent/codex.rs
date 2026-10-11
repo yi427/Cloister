@@ -3,6 +3,7 @@
 use std::{ffi::OsString, path::Path};
 
 use super::{AgentAdapter, AgentCommand, AgentHostBridge};
+use crate::profile::HostExecMode;
 
 /// Adapter for the Codex CLI installed in the Cloister software cache.
 #[derive(Clone, Copy, Debug, Default)]
@@ -50,7 +51,7 @@ impl AgentAdapter for CodexAgent {
             );
             push_config(
                 &mut command_arguments,
-                "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.exec\",\"host.exec_status\",\"host.exec_cancel\"]",
+                "mcp_servers.cloister_host.enabled_tools=[\"host.list_commands\",\"host.find_command\",\"host.exec\",\"host.exec_status\",\"host.exec_cancel\"]",
             );
             push_config(
                 &mut command_arguments,
@@ -58,7 +59,14 @@ impl AgentAdapter for CodexAgent {
             );
             push_config(
                 &mut command_arguments,
-                "mcp_servers.cloister_host.tools.\"host.exec\".approval_mode=\"prompt\"",
+                format!(
+                    "mcp_servers.cloister_host.tools.\"host.exec\".approval_mode=\"{}\"",
+                    if bridge.mode() == HostExecMode::OnDemand {
+                        "auto"
+                    } else {
+                        "prompt"
+                    }
+                ),
             );
         }
         command_arguments.extend_from_slice(arguments);

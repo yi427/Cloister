@@ -50,7 +50,7 @@ enum HostCommand {
         #[arg(long, value_name = "TOKEN_FILE", value_hint = ValueHint::FilePath)]
         token_file: PathBuf,
 
-        /// Path to a Profile V7 TOML file.
+        /// Path to a Profile V7 or V8 TOML file.
         ///
         /// Defaults to ~/.config/cloister/profile.toml.
         #[arg(long, value_name = "PROFILE", value_hint = ValueHint::FilePath)]
@@ -67,9 +67,12 @@ enum HostCommand {
         #[arg(long, value_name = "TOKEN_FILE", value_hint = ValueHint::FilePath)]
         token_file: PathBuf,
 
-        /// Stable command name from the bridge's Profile allowlist.
+        /// Allowed name, or a bare host PATH name in on-demand mode.
         #[arg(value_name = "COMMAND")]
         command: String,
+        /// Short purpose explaining why Host execution is needed (required on-demand).
+        #[arg(long)]
+        reason: Option<String>,
 
         /// Literal arguments passed directly to the allowed executable.
         #[arg(last = true, value_name = "ARGUMENT")]
@@ -89,8 +92,9 @@ impl HostArgs {
                 endpoint,
                 token_file,
                 command,
+                reason,
                 arguments,
-            } => exec_command(&endpoint, token_file, command, arguments).await,
+            } => exec_command(&endpoint, token_file, command, arguments, reason).await,
         }
     }
 }
@@ -149,7 +153,15 @@ async fn serve_command(
         "Audit log: {} (JSONL, owner-only, 20 MiB total)",
         audit_log_path.display()
     );
-    println!("Tools: host.list_commands, host.exec, host.exec_status, host.exec_cancel");
+    println!(
+        "Tools: host.list_commands, host.find_command, host.exec, host.exec_status, host.exec_cancel"
+    );
+    println!("Host Exec mode: {}", policy.mode().as_str());
+    if policy.mode() == crate::profile::HostExecMode::OnDemand {
+        println!(
+            "Host access: broad; host startup PATH commands may run without registration; macOS user permissions; purpose required; Guest-first guidance is not containment"
+        );
+    }
     println!("Allowed commands: {}", policy.command_count());
 
     let server = serve(
@@ -184,12 +196,14 @@ async fn exec_command(
     token_file: PathBuf,
     command: String,
     arguments: Vec<String>,
+    reason: Option<String>,
 ) -> Result<(), HostCommandError> {
     let token = BridgeToken::load(token_file)?;
     let mut output = call_host_exec(
         endpoint,
         &token,
         &HostExecRequest {
+            reason,
             version: HOST_EXEC_DSL_VERSION,
             command,
             args: arguments,

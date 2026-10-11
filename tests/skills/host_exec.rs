@@ -71,6 +71,24 @@ fn declares_the_canonical_skill_and_mcp_dependency() {
 }
 
 #[test]
+fn distinguishes_on_demand_authority_from_guest_first_behavior() {
+    for requirement in [
+        "`on-demand`",
+        "`host.find_command`",
+        "Reuse successful results",
+        "`reason` is required",
+        "not an enforced security boundary",
+        "grants broad macOS-user execution authority",
+        "not persisted in audit logs",
+    ] {
+        assert!(
+            SKILL.contains(requirement),
+            "missing on-demand guidance: {requirement}"
+        );
+    }
+}
+
+#[test]
 fn image_exposes_one_canonical_source_without_persistent_state_writes() {
     assert_eq!(CONTAINERFILE.matches("COPY skills/host-exec").count(), 1);
     assert!(CONTAINERFILE.contains("/usr/local/share/cloister/skills/host-exec"));

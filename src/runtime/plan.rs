@@ -1,5 +1,6 @@
 //! Inspectable representation of a planned environment.
 
+use crate::profile::HostExecMode;
 use std::{
     ffi::{OsStr, OsString},
     fmt,
@@ -19,6 +20,7 @@ pub struct RuntimePlan {
     pub(super) host_bridge_endpoint: Option<String>,
     pub(super) host_audit_log_path: Option<PathBuf>,
     pub(super) host_commands: Vec<HostCommandPlan>,
+    pub(super) host_exec_mode: Option<HostExecMode>,
     pub(super) command: CommandSpec,
 }
 
@@ -122,8 +124,22 @@ impl fmt::Display for RuntimePlan {
             )?;
             writeln!(
                 formatter,
-                "Host capabilities: host.list_commands, host.exec, host.exec_status, host.exec_cancel (Profile-governed; macOS user permissions)"
+                "Host capabilities: host.list_commands, host.find_command, host.exec, host.exec_status, host.exec_cancel (Profile-governed; macOS user permissions)"
             )?;
+            let mode = self
+                .host_exec_mode
+                .expect("enabled bridge should have a mode");
+            writeln!(formatter, "Host Exec mode: {}", mode.as_str())?;
+            if mode == HostExecMode::OnDemand {
+                writeln!(
+                    formatter,
+                    "Host access: broad; bare commands from the host startup PATH are available without registration; pinned commands take precedence"
+                )?;
+                writeln!(
+                    formatter,
+                    "Host routing: Guest first; each host execution requires a short purpose (behavioral guidance, not containment)"
+                )?;
+            }
             writeln!(
                 formatter,
                 "Host policy: inherit-all environment, {} allowed command(s)",
@@ -140,8 +156,13 @@ impl fmt::Display for RuntimePlan {
             }
             writeln!(
                 formatter,
-                "{} MCP approval: prompt for host.exec only",
-                self.agent_name
+                "{} MCP approval: {}",
+                self.agent_name,
+                if mode == HostExecMode::OnDemand {
+                    "auto for Cloister Host tools; client policy may still deny or prompt"
+                } else {
+                    "prompt for host.exec only"
+                }
             )?;
             writeln!(
                 formatter,

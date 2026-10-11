@@ -8,8 +8,10 @@ version boundary.
 
 - `Cargo.toml` is the source of truth for the Cloister CLI release version.
 - A release image uses the same exact version as the CLI that selects it.
-- `schema_version` changes only when the public Profile contract becomes
-  incompatible; it does not follow every CLI release.
+- `schema_version` changes when the public Profile contract or authorization
+  semantics need a new version; it does not follow every CLI release. Version
+  0.4.0 introduces V8 while retaining V7 allowlist behavior. V8 requires an
+  explicit Host Exec mode.
 - Node.js and Rust remain pinned in `images/rust-node/Containerfile`.
 - Codex and Claude Code are installed on first use and updated independently.
   Agent updates do not require a Cloister image release. Record the exact Agent
@@ -23,8 +25,8 @@ CLI version:
 ghcr.io/yi427/cloister:<CARGO_PKG_VERSION>
 ```
 
-For example, Cloister CLI `0.3.1` selects
-`ghcr.io/yi427/cloister:0.3.1`.
+For example, Cloister CLI `0.4.0` selects
+`ghcr.io/yi427/cloister:0.4.0`.
 
 The CLI enforces this pair for official release images. An older or newer
 official `X.Y.Z` image fails closed before agent startup, including `--dry-run`
@@ -32,20 +34,20 @@ plans.
 
 ## Choosing a release version
 
-Use a patch release for a focused bug fix that keeps the Profile contract
-compatible, such as the project workspace-path fix in `0.3.1`.
-Profile `schema_version` remains `7` for that fix. Update the CLI version,
-lockfile, exact image reference, and release documentation together during
+Use a patch release for a focused compatible bug fix. Use a minor release for
+new capabilities or authorization semantics: `0.4.0` introduces explicit Host
+Exec modes in Profile V8 and retains V7 allowlist behavior. Update the CLI
+version, lockfile, exact image reference, and release documentation together during
 release preparation; a development fix does not require an immediate version
 bump. Never replace the already published `v0.3.0` tag or `0.3.0` image.
 
 The latest published release is
-[0.3.1](https://github.com/yi427/Cloister/releases/tag/v0.3.1).
-See the [0.3.1 notes](releases/v0.3.1.md) for changes and upgrade instructions.
+[0.4.0](https://github.com/yi427/Cloister/releases/tag/v0.4.0).
+See the [0.4.0 notes](releases/v0.4.0.md) for changes and upgrade instructions.
 
 ## CLI distribution boundary
 
-The 0.3.x CLI is distributed through the official `yi427/tap` Homebrew tap.
+The 0.4.x CLI is distributed through the official `yi427/tap` Homebrew tap.
 The Formula downloads the immutable release archive, verifies its SHA-256,
 installs the Apple `container` runtime dependency, and compiles Cloister with
 Homebrew's Rust toolchain.
@@ -59,7 +61,7 @@ Direct installation from the exact Git tag remains supported:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.3.1 \
+  --tag v0.4.0 \
   cloister
 ```
 
@@ -149,16 +151,16 @@ Before creating a release tag, all of the following must be true:
 11. Run `cloister init`, `cloister check`, and one Codex and Claude smoke test
     against the exact release image.
 12. Create a GitHub Release from the verified tag with reviewed notes and no
-    binary attachments for 0.3.x.
+    binary attachments for 0.4.x.
 13. Update `Formula/cloister.rb` in `yi427/homebrew-tap` to the immutable release
     archive and SHA-256, then audit, install from source, and test the Formula
     before publishing it.
 
-Example for the `0.3.1` patch release, after all gates pass:
+Example for the `0.4.0` minor release, after all gates pass:
 
 ```sh
-git tag -a v0.3.1 -m "Release Cloister 0.3.1"
-git push origin v0.3.1
+git tag -a v0.4.0 -m "Release Cloister 0.4.0"
+git push origin v0.4.0
 ```
 
 The publish workflow rejects a release tag whose version does not exactly
@@ -188,25 +190,25 @@ Existing backups are never overwritten. Immutable testing images, custom
 images, future releases, moving official tags, symlinks, and incompatible
 Profile schemas require manual review instead of automatic conversion.
 
-## 0.3.1 checklist
+## 0.4.0 checklist
 
 This checklist is a preparation template, not a live publication-status
-tracker. The [GitHub release](https://github.com/yi427/Cloister/releases/tag/v0.3.1)
+tracker. The [GitHub release](https://github.com/yi427/Cloister/releases/tag/v0.4.0)
 records completed checks and coverage limits. Copy and update the template
 for a future release, and keep its results separate from development testing.
 
 - [ ] MIT OR Apache-2.0 licensing files and Cargo metadata are present.
 - [ ] `Cargo.toml`, `Cargo.lock`, `cloister --version`, the example Profile, and
-  the default `init` image all resolve to `0.3.1`.
+  the default `init` image all resolve to `0.4.0`.
 - [ ] Local `make verify` passes.
 - [ ] The release commit is pushed and GitHub `Verify` passes.
 - [ ] `main` and `origin/main` identify the same release commit.
-- [ ] Annotated tag `v0.3.1` is created from that commit and pushed once.
-- [ ] Image tags `0.3.1`, `0.3`, and `sha-<release-commit>` exist.
-- [ ] Anonymous GHCR access returns a Linux ARM64 manifest for `0.3.1`.
-- [ ] Source installation from `v0.3.1` succeeds with `--locked`.
+- [ ] Annotated tag `v0.4.0` is created from that commit and pushed once.
+- [ ] Image tags `0.4.0`, `0.4`, and `sha-<release-commit>` exist.
+- [ ] Anonymous GHCR access returns a Linux ARM64 manifest for `0.4.0`.
+- [ ] Source installation from `v0.4.0` succeeds with `--locked`.
 - [ ] `init`, `check`, Codex, Claude, Host Exec, cancellation, and audit smoke
-  tests pass against `ghcr.io/yi427/cloister:0.3.1`.
+  tests pass against `ghcr.io/yi427/cloister:0.4.0`.
 - [ ] A GitHub Release is created with source archives and no binary assets.
 - [ ] The official Homebrew Formula points at the exact release archive and
   passes audit, source installation, and `brew test`.

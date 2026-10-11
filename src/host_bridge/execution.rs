@@ -294,18 +294,7 @@ impl ExecutionManager {
             Ok(authorized) => authorized,
             Err(source) => {
                 self.audit
-                    .denied(
-                        request_id,
-                        request,
-                        match &source {
-                            HostExecAuthorizationError::UnsupportedVersion { .. } => {
-                                "unsupported_version"
-                            }
-                            HostExecAuthorizationError::CommandNotAllowed { .. } => {
-                                "command_not_allowed"
-                            }
-                        },
-                    )
+                    .denied(request_id, request, source.failure_kind())
                     .await
                     .map_err(ExecutionError::Audit)?;
                 return Err(ExecutionError::Authorization(source));

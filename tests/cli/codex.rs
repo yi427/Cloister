@@ -86,7 +86,7 @@ fn keeps_the_shared_agent_command_help() {
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert!(stdout.contains("Path to a Profile V7 TOML file"));
+    assert!(stdout.contains("Path to a Profile V7 or V8 TOML file"));
     assert!(stdout.contains("Print the runtime plan without starting the agent"));
     assert!(stdout.contains("Arguments passed directly to the agent"));
 }
@@ -124,7 +124,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
         home.join(".local/state/cloister/audit/host-exec.jsonl")
             .display()
     )));
-    assert!(stdout.contains("Host capabilities: host.list_commands, host.exec"));
+    assert!(stdout.contains("Host capabilities: host.list_commands, host.find_command, host.exec"));
     assert!(stdout.contains("Host policy: inherit-all environment, 1 allowed command(s)"));
     assert!(stdout.contains("Host Skill: host-exec (canonical read-only image source)"));
     assert!(stdout.contains(&format!(
@@ -135,7 +135,7 @@ fn default_profile_uses_current_directory_and_shared_codex_state() {
     assert!(stdout.contains("\"CLOISTER_HOST_BRIDGE_TOKEN\""));
     assert!(stdout.contains("mcp_servers.cloister_host.required=true"));
     assert!(stdout.contains(
-        "enabled_tools=[\\\"host.list_commands\\\",\\\"host.exec\\\",\\\"host.exec_status\\\",\\\"host.exec_cancel\\\"]"
+        "enabled_tools=[\\\"host.list_commands\\\",\\\"host.find_command\\\",\\\"host.exec\\\",\\\"host.exec_status\\\",\\\"host.exec_cancel\\\"]"
     ));
     assert!(stdout.contains("default_tools_approval_mode=\\\"auto\\\""));
     assert!(stdout.contains("tools.\\\"host.exec\\\".approval_mode=\\\"prompt\\\""));

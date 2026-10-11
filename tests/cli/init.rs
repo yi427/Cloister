@@ -114,7 +114,7 @@ fn creates_a_versioned_profile_and_prepares_every_missing_component() {
         HostExecEnvironmentMode::InheritAll
     );
     assert!(profile.host.exec.allow.is_empty());
-    assert!(profile_source.contains("schema_version = 7"));
+    assert!(profile_source.contains("schema_version = 8"));
     assert!(profile_source.contains("proxy = \"disabled\""));
     assert!(profile_source.contains("[agent]"));
     assert!(profile_source.contains("[host.exec]"));
@@ -369,6 +369,48 @@ fn cancellation_before_missing_runtime_setup_writes_nothing() {
     assert!(output.stderr.is_empty());
     assert!(stdout.ends_with("No changes made.\n"));
     assert!(!home.join(".config/cloister/profile.toml").exists());
+}
+
+#[test]
+fn on_demand_initialization_discloses_broad_authority_and_needs_no_command_registration() {
+    let directory = tempdir().unwrap();
+    let home = directory.path().join("home");
+    let bin = directory.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let mut command = init_command(&home, &bin);
+    command
+        .args(["--host-exec-mode", "on-demand"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"\ncloister:dev\n\n\n\ny\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "runtime is intentionally absent"
+    );
+    assert!(output.stderr.is_empty());
+    let disclosure = stdout.find("Broad host authority:").unwrap();
+    let confirmation = stdout
+        .find("Create the Profile without runtime setup?")
+        .unwrap();
+    assert!(disclosure < confirmation);
+    assert!(!stdout.contains("Host command names"));
+    let profile = load_profile(home.join(".config/cloister/profile.toml")).unwrap();
+    assert_eq!(profile.schema_version, 8);
+    assert_eq!(
+        profile.host.exec.mode,
+        cloister::profile::HostExecMode::OnDemand
+    );
+    assert!(profile.host.exec.allow.is_empty());
 }
 
 #[test]
