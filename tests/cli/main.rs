@@ -2,6 +2,7 @@ mod check;
 mod claude;
 mod codex;
 mod host;
+mod host_audit;
 mod init;
 mod profile_check;
 mod profile_upgrade;

@@ -485,6 +485,10 @@ Host Exec writes versioned JSONL lifecycle metadata to:
 ${XDG_STATE_HOME:-~/.local/state}/cloister/audit/host-exec.jsonl
 ```
 
+Routine execution audit events stay in this file without terminal output, so
+the embedded bridge does not disrupt interactive Claude or Codex sessions.
+Audit write failures still produce an error diagnostic.
+
 The active file and one rotated segment are each limited to 10 MiB. Directories
 use mode `0700`; log and lock files use `0600`. Rotation is coordinated across
 bridge processes. Unsafe ownership, permissions, links, or oversized existing
