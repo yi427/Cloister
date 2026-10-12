@@ -21,6 +21,13 @@ use cloister::{
         HostExecEnvironmentProfile, HostExecProfile,
     },
 };
+use rmcp::{
+    ServiceExt,
+    model::CacheScope,
+    transport::{
+        StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
+    },
+};
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -106,6 +113,46 @@ fn request(command: &str, args: &[&str]) -> HostExecRequest {
         command: command.to_owned(),
         args: args.iter().map(|argument| (*argument).to_owned()).collect(),
     }
+}
+
+#[tokio::test]
+async fn tool_discovery_includes_cache_hints_required_by_strict_mcp_clients() {
+    let directory = tempdir().expect("temporary directory should exist");
+    let token_path = directory.path().join("bridge.token");
+    let token = create_token(&token_path);
+    let bearer = fs::read_to_string(token_path).expect("test token should be readable");
+    let (endpoint, cancellation, handle) = start(token, empty_policy(), directory.path()).await;
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(endpoint)
+            .auth_header(bearer.trim().to_owned()),
+    );
+    let client = ().serve(transport).await.expect("client should connect");
+
+    let result = client
+        .list_tools(None)
+        .await
+        .expect("tools/list should return the tool catalog");
+
+    assert_eq!(result.ttl_ms, Some(0));
+    assert_eq!(result.cache_scope, Some(CacheScope::Private));
+    let names = result
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "host.exec",
+            "host.exec_cancel",
+            "host.exec_status",
+            "host.find_command",
+            "host.list_commands",
+        ]
+    );
+
+    client.cancel().await.expect("client should stop cleanly");
+    stop(cancellation, handle).await;
 }
 
 #[tokio::test]
