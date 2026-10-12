@@ -33,10 +33,10 @@ authority inspectable:
   active boundaries without printing secrets.
 
 > [!NOTE]
-> [0.4.0](https://github.com/yi427/Cloister/releases/tag/v0.4.0) adds explicit
-> on-demand Host tools in Profile V8. Existing V7 Profiles keep allowlist
-> behavior and can update their image with `cloister profile upgrade`.
-> See the [release notes](docs/releases/v0.4.0.md).
+> [0.4.1](https://github.com/yi427/Cloister/releases/tag/v0.4.1) fixes Claude Code
+> Host MCP tool discovery. Profile V8 on-demand access and V7 allowlist behavior
+> are unchanged. Update the matching image with `cloister profile upgrade`.
+> See the [release notes](docs/releases/v0.4.1.md).
 
 ## Quick start
 
@@ -94,7 +94,7 @@ Direct source installation requires Rust 1.97.1 or newer with Cargo:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.4.0 \
+  --tag v0.4.1 \
   cloister
 ```
 
@@ -104,8 +104,8 @@ Profile V6 and earlier require a new V8 Profile; `profile upgrade` does not
 migrate schemas. Supported V7 and V8 Profiles pair the CLI tag and base image:
 
 ```text
-CLI:   v0.4.0
-Image: ghcr.io/yi427/cloister:0.4.0
+CLI:   v0.4.1
+Image: ghcr.io/yi427/cloister:0.4.1
 ```
 
 Cloister refuses to start an agent when an official release image does not
@@ -140,7 +140,7 @@ capability it exposes.
 
 Cloister 0.4.0 adds Profile V8 and explicit on-demand Host tools.
 V7 Profiles keep their existing allowlist behavior. Enabling on-demand
-requires V8 and the matching 0.4.0 guest image, which includes the updated
+requires V8 and the matching 0.4.x guest image, which includes the updated
 canonical Host Skill.
 
 > [!WARNING]
@@ -209,7 +209,7 @@ schema_version = 8
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.4.0"
+reference = "ghcr.io/yi427/cloister:0.4.1"
 architecture = "arm64"
 
 [guest]

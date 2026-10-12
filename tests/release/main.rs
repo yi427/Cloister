@@ -4,7 +4,7 @@ const README: &str = include_str!("../../README.md");
 const RELEASING: &str = include_str!("../../docs/releasing.md");
 const EXAMPLE_PROFILE: &str = include_str!("../../examples/profile.toml");
 const CONTAINERFILE: &str = include_str!("../../images/rust-node/Containerfile");
-const CURRENT_RELEASE_NOTES: &str = include_str!("../../docs/releases/v0.4.0.md");
+const CURRENT_RELEASE_NOTES: &str = include_str!("../../docs/releases/v0.4.1.md");
 const LICENSE_APACHE: &str = include_str!("../../LICENSE-APACHE");
 const LICENSE_MIT: &str = include_str!("../../LICENSE-MIT");
 

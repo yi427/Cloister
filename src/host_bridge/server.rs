@@ -10,9 +10,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use rmcp::{
-    Json, ServerHandler,
+    ErrorData, Json, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{MetaObject, ServerCapabilities, ServerInfo},
+    model::{
+        CacheScope, ListToolsResult, MetaObject, PaginatedRequestParams, ServerCapabilities,
+        ServerInfo,
+    },
+    service::RequestContext,
     tool, tool_handler, tool_router,
     transport::{
         StreamableHttpServerConfig, StreamableHttpService,
@@ -149,6 +153,17 @@ impl HostBridgeService {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for HostBridgeService {
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        // Strict clients require cache hints; catalogs belong to this authenticated bridge.
+        Ok(ListToolsResult::with_all_items(self.tool_router.list_all())
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private))
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Call host.list_commands first and follow its mode. Prefer Guest file tools and Guest commands. Use Host execution only for macOS capabilities or a required tool missing in the Guest. In allowlist mode use only listed names; in on-demand mode call host.find_command for a bare host PATH name, reuse discovery, and supply a short reason to host.exec. Explain each host operation before invoking it; use workspace-relative paths. Do not use Host interpreters or shells to transfer files or turn routine Guest work into Host execution. Read running output using host.exec_status with its cursor and a bounded wait; cancel unwanted work with host.exec_cancel. The reason and these routing rules are behavioral guidance, not containment. On-demand grants broad macOS-user authority and does not ask for per-command registration or Cloister execution approvals; client policies may still deny or prompt. Arguments are literal with no implicit shell parsing.",
