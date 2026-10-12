@@ -553,17 +553,6 @@ async fn supervise(
         snapshot.state = HostExecutionState::Failed;
     }
     record.finish(snapshot.state, exit_code, snapshot.duration_ms);
-    eprintln!(
-        "audit capability=host.exec execution_id={:?} command={:?} outcome={:?} exit_code={:?} duration_ms={} stdout_bytes={} stderr_bytes={} output_truncated={}",
-        record.execution_id,
-        record.command_name,
-        snapshot.state,
-        exit_code,
-        snapshot.duration_ms,
-        snapshot.stdout_bytes,
-        snapshot.stderr_bytes,
-        snapshot.output_truncated,
-    );
 }
 
 async fn read_output(

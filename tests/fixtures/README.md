@@ -33,3 +33,8 @@ scenarios, and records only test-controlled arguments in temporary directories.
 marker. Host-tool tests install it only in temporary directories to distinguish
 read-only discovery from actual execution. `valid/default.toml` retains V7
 allowlist coverage; `valid/on-demand.toml` covers explicit Profile V8 access.
+
+`host-audit-runtime.sh` substitutes a local authenticated MCP client for the
+agent container. `host-audit-tool.sh` emits test output with a selected exit code.
+They verify that agent sessions retain file auditing and MCP output without
+writing routine execution logs to the shared terminal.

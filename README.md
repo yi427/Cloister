@@ -33,10 +33,11 @@ authority inspectable:
   active boundaries without printing secrets.
 
 > [!NOTE]
-> [0.4.1](https://github.com/yi427/Cloister/releases/tag/v0.4.1) fixes Claude Code
-> Host MCP tool discovery. Profile V8 on-demand access and V7 allowlist behavior
-> are unchanged. Update the matching image with `cloister profile upgrade`.
-> See the [release notes](docs/releases/v0.4.1.md).
+> [0.4.2](https://github.com/yi427/Cloister/releases/tag/v0.4.2) keeps routine Host
+> Exec audit logs off interactive Claude and Codex terminals. File auditing and
+> Host access policies are unchanged. Update the matching image with
+> `cloister profile upgrade`.
+> See the [release notes](docs/releases/v0.4.2.md).
 
 ## Quick start
 
@@ -94,7 +95,7 @@ Direct source installation requires Rust 1.97.1 or newer with Cargo:
 ```sh
 cargo install --locked \
   --git https://github.com/yi427/Cloister.git \
-  --tag v0.4.1 \
+  --tag v0.4.2 \
   cloister
 ```
 
@@ -104,8 +105,8 @@ Profile V6 and earlier require a new V8 Profile; `profile upgrade` does not
 migrate schemas. Supported V7 and V8 Profiles pair the CLI tag and base image:
 
 ```text
-CLI:   v0.4.1
-Image: ghcr.io/yi427/cloister:0.4.1
+CLI:   v0.4.2
+Image: ghcr.io/yi427/cloister:0.4.2
 ```
 
 Cloister refuses to start an agent when an official release image does not
@@ -209,7 +210,7 @@ schema_version = 8
 name = "default"
 
 [image]
-reference = "ghcr.io/yi427/cloister:0.4.1"
+reference = "ghcr.io/yi427/cloister:0.4.2"
 architecture = "arm64"
 
 [guest]
@@ -484,6 +485,10 @@ Host Exec writes versioned JSONL lifecycle metadata to:
 ```text
 ${XDG_STATE_HOME:-~/.local/state}/cloister/audit/host-exec.jsonl
 ```
+
+Routine execution audit events stay in this file without terminal output, so
+the embedded bridge does not disrupt interactive Claude or Codex sessions.
+Audit write failures still produce an error diagnostic.
 
 The active file and one rotated segment are each limited to 10 MiB. Directories
 use mode `0700`; log and lock files use `0600`. Rotation is coordinated across

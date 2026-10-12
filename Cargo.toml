@@ -1,6 +1,6 @@
 [package]
 name = "cloister"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.97"
 description = "A privacy-oriented development environment for AI coding agents"
